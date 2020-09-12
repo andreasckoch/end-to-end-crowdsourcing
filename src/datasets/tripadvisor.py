@@ -3,7 +3,7 @@ from datasets import BaseDataset
 
 def line_processor(line, text_processor):
     rating, text = (lambda x: (x[0], x[1]))(line.split('\t'))
-    return {'rating': rating, 'text': text_processor(text)}
+    return {'rating': rating, 'text': text, 'embedding': text_processor(text)}
 
 
 def file_processor(path, text_processor, label):
