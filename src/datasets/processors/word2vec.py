@@ -7,4 +7,4 @@ def _build_text_processor(**argv):
 
 # TODO
 def text_processor(model, line, **argv):
-    return line.lower()
+    return line

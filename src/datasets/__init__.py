@@ -14,13 +14,27 @@ class BaseDataset(Dataset):
 
     def _build_text_processor(self, **argv):
         text_processor = argv.get('text_processor', 'word2vec').lower()
+        text_processor_filters = argv.get('text_processor_filters', [])
 
         if text_processor == 'word2vec':
             from datasets.processors.word2vec import _build_text_processor, text_processor
             self.text_processor_model = _build_text_processor(**argv)
             self.text_processor_func = text_processor
 
+        self.text_processor_filters = []
+        for f in text_processor_filters:
+            if f == 'stopwordfilter' or f == 'stopwordsfilter':
+                from datasets.transformers.text import stopwordsfilter
+                self.text_processor_filters.append(stopwordsfilter)
+            
+            if f == 'lowercase' or f == 'lower':
+                from datasets.transformers.text import lowercase
+                self.text_processor_filters.append(lowercase)
+
+
     def text_processor(self, text, **argv):
+        for _filter in self.text_processor_filters:
+            text = _filter(text)
         return self.text_processor_func(self.text_processor_model, text, **argv)
 
     def data_shuffle(self):
