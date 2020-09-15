@@ -27,13 +27,12 @@ class TripAdvisorDataset(BaseDataset):
                 size += 'k'
             if size not in ['1k', '2k', '4k', '8k', '16k']:
                 raise Exception('Size must be one of these: 1k, 2k, 4k, 8k, 16k or max')
-        
+
         if stars != 'All':
             if len(stars) == 1:
                 stars += '.0'
             if stars not in ['2.0', '3.0', '4.0']:
                 raise Exception('Stars must be one of these: 2.0, 3.0, 4.0 or All')
-
 
         root = f'../data/tripadvisor/{size} text files'
         path_f = f'{root}/TripAdvisorUKHotels-{stars}-{size}_F.txt'
@@ -43,5 +42,5 @@ class TripAdvisorDataset(BaseDataset):
         data_m = file_processor(path_m, self.text_processor, 'm')
 
         self.data = data_f + data_m
-        
+
         self.data_shuffle()

@@ -128,4 +128,8 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
+# Visual Studio
+.vscode
+
 data/tripadvisor/**/*.txt
+data/embeddings/word2vec/*.txt

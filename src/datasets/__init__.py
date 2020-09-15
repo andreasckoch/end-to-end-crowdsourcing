@@ -1,4 +1,7 @@
 from torch.utils.data import Dataset, DataLoader
+import torch
+import numpy as np
+
 
 class BaseDataset(Dataset):
     """Dataset Template"""
@@ -8,6 +11,7 @@ class BaseDataset(Dataset):
 
         self.mode = 'train'
         self.train_val_split = argv.get('train_val_split', 0.8)
+        self.device = torch.device(argv.get('device', 'cpu'))
 
         self._build_text_processor(**argv)
         pass
@@ -26,26 +30,28 @@ class BaseDataset(Dataset):
             if f == 'stopwordfilter' or f == 'stopwordsfilter':
                 from datasets.transformers.text import stopwordsfilter
                 self.text_processor_filters.append(stopwordsfilter)
-            
+
             if f == 'lowercase' or f == 'lower':
                 from datasets.transformers.text import lowercase
                 self.text_processor_filters.append(lowercase)
 
-
     def text_processor(self, text, **argv):
         for _filter in self.text_processor_filters:
             text = _filter(text)
+            if text is '':
+                # TODO: maybe exclude these samples? Right now we get all zeros from text_processor_func
+                pass
         return self.text_processor_func(self.text_processor_model, text, **argv)
 
     def data_shuffle(self):
-        import random 
+        import random
         random.seed(123456789)
         random.shuffle(self.data)
 
-        l = len(self.data)
-        eof_train_split = int(l*self.train_val_split*0.9)
-        eof_val_split = int(l*0.9)
-        
+        length = len(self.data)
+        eof_train_split = int(length * self.train_val_split * 0.9)
+        eof_val_split = int(length * 0.9)
+
         self.data = {
             'train': self.data[0:eof_train_split],
             'validation': self.data[eof_train_split:eof_val_split],
@@ -61,4 +67,9 @@ class BaseDataset(Dataset):
         return len(self.data[self.mode])
 
     def __getitem__(self, idx):
-        return self.data[self.mode][idx]
+        datapoint = self.data[self.mode][idx]
+
+        # convert to torch tensor
+        datapoint['embedding'] = torch.tensor(datapoint['embedding'], device=self.device, dtype=torch.float32)
+
+        return datapoint
