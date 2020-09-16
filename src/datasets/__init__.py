@@ -73,3 +73,23 @@ class BaseDataset(Dataset):
         datapoint['embedding'] = torch.tensor(datapoint['embedding'], device=self.device, dtype=torch.float32)
 
         return datapoint
+
+
+class SimpleCustomBatch:
+    """
+    Create function to apply to batch to allow for memory pinning when using a custom batch/custom dataset.
+    Following guide on https://pytorch.org/docs/master/data.html#single-and-multi-process-data-loading
+    """
+
+    def __init__(self, data, device):
+        self.input = torch.stack([sample['embedding'] for sample in data]).to(device=device)
+        self.target = torch.stack([sample['label'] for sample in data]).to(device=device)
+
+    def pin_memory(self):
+        self.input = self.input.pin_memory()
+        self.target = self.target.pin_memory()
+        return self
+
+
+def collate_wrapper(batch, device=torch.device('cuda')):
+    return SimpleCustomBatch(batch, device)
