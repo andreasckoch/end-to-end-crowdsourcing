@@ -14,11 +14,12 @@ from datasets import collate_wrapper
 from models.ipa2lt_head import Ipa2ltHead
 
 
+
 class Solver(object):
 
     def __init__(self, dataset, learning_rate, batch_size, momentum=0.9, model_weights_path='',
                  writer=None, device=torch.device('cpu'), verbose=True,
-                 embedding_dim=50, label_dim=2, annotator_dim=2,
+                 embedding_dim=50, label_dim=2, annotator_dim=2, pretrained_model=None,
                  ):
         self.learning_rate = learning_rte
         self.batch_size = batch_size
@@ -31,6 +32,7 @@ class Solver(object):
         self.device = device
         self.writer = writer
         self.verbose = verbose
+	self.pretrained_model = pretrained_model
 
     def _get_model(self):
         model = Ipa2ltHead(self.embedding_dim, self.label_dim, self.annotator_dim)
@@ -47,7 +49,10 @@ class Solver(object):
             print(*args, **kwargs)
 
     def fit(self, epochs, return_f1=False):
-        model = self._get_model()
+	if self.pretrained_model is None:
+            model = self._get_model()
+	else:
+	    model = self.pretrained_model
 
         if self.label_dim is 2:
             criterion = nn.BCELoss()
