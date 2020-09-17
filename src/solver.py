@@ -1,7 +1,6 @@
 import copy
 import datetime
 import time
-import pytz
 import itertools
 import torch
 import numpy as np
@@ -14,14 +13,13 @@ from datasets import collate_wrapper
 from models.ipa2lt_head import Ipa2ltHead
 
 
-
 class Solver(object):
 
     def __init__(self, dataset, learning_rate, batch_size, momentum=0.9, model_weights_path='',
                  writer=None, device=torch.device('cpu'), verbose=True,
                  embedding_dim=50, label_dim=2, annotator_dim=2, pretrained_model=None,
                  ):
-        self.learning_rate = learning_rte
+        self.learning_rate = learning_rate
         self.batch_size = batch_size
         self.dataset = dataset
         self.embedding_dim = embedding_dim
@@ -58,9 +56,12 @@ class Solver(object):
             criterion = nn.BCELoss()
         elif self.label_dim > 2:
             criterion = nn.CrossEntropyLoss()
-        optimizers = [optim.AdamW([model.basic_network.parameters(), model.bias_matrices[i].parameters()],
-                                  lr=self.learning_rate, betas=(0.9, 0.999), eps=1e-08, weight_decay=0.01, amsgrad=False)
-                      for i in range(self.annotator_dim)]
+        optimizers = [optim.AdamW([
+            {'params': model.basic_network.parameters()},
+            {'params': model.bias_matrices[i].parameters()},
+        ],
+            lr=self.learning_rate, betas=(0.9, 0.999), eps=1e-08, weight_decay=0.01, amsgrad=False)
+            for i in range(self.annotator_dim)]
 
         loss_history = []
         inputs = 0
@@ -74,14 +75,16 @@ class Solver(object):
             # TODO - loop over all annotators for training and do evaluation differently (maybe with latent truth??)
             for i in range(self.annotator_dim):
                 # switch to current annotator
-                self.dataset.annotator_filter(self.dataset.annotators[i])
+                annotator = self.dataset.annotators[i]
+                self.dataset.set_annotator_filter(annotator)
+                optimizer = optimizers[i]
 
                 # training
                 self.dataset.set_mode('train')
                 train_loader = torch.utils.data.DataLoader(
                     self.dataset, batch_size=self.batch_size, collate_fn=collate_wrapper)
                 self.fit_epoch(model, optimizer, criterion,
-                               train_loader, epoch, loss_history)
+                               train_loader, annotator, epoch, loss_history)
 
                 # validation
                 self.dataset.set_mode('validation')
@@ -89,10 +92,10 @@ class Solver(object):
                     self.dataset, batch_size=self.batch_size, collate_fn=collate_wrapper)
                 if return_f1:
                     _, _, f1 = self.fit_epoch(model, optimizer, criterion,
-                                              val_loader, epoch, loss_history, mode='train', return_metrics=True)
+                                              val_loader, annotator, epoch, loss_history, mode='train', return_metrics=True)
                 else:
                     self.fit_epoch(model, optimizer, criterion,
-                                   val_loader, epoch, loss_history, mode='validation')
+                                   val_loader, annotator, epoch, loss_history, mode='validation')
 
         self._print('Finished Training' + 20 * ' ')
         self._print('sum of first 10 losses: ', sum(loss_history[0:10]))

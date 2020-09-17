@@ -2,6 +2,7 @@ from .utils import initialize_weight
 from .basic import BasicNetwork
 
 import torch.nn as nn
+import torch
 
 
 class Ipa2ltHead(nn.Module):
@@ -21,7 +22,8 @@ class Ipa2ltHead(nn.Module):
         out = []
         for matrix in self.bias_matrices:
             # normalize rows of bias matrices
-            matrix.weight = nn.Parameter(torch.norm(matrix.weight, dim=1, p=1, keepdim=True))
+            normalized = matrix.weight / torch.norm(matrix.weight, dim=1, p=1, keepdim=True)
+            matrix.weight = nn.Parameter(normalized.abs())
 
             # forward pass
             pred = matrix(x)
