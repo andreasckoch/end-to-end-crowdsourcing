@@ -32,7 +32,7 @@ class Solver(object):
         self.device = device
         self.writer = writer
         self.verbose = verbose
-	self.pretrained_model = pretrained_model
+        self.pretrained_model = pretrained_model
 
     def _get_model(self):
         model = Ipa2ltHead(self.embedding_dim, self.label_dim, self.annotator_dim)
@@ -49,10 +49,10 @@ class Solver(object):
             print(*args, **kwargs)
 
     def fit(self, epochs, return_f1=False):
-	if self.pretrained_model is None:
+        if self.pretrained_model is None:
             model = self._get_model()
-	else:
-	    model = self.pretrained_model
+        else:
+            model = self.pretrained_model
 
         if self.label_dim is 2:
             criterion = nn.BCELoss()
