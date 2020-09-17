@@ -3,14 +3,14 @@ from datasets import BaseDataset
 
 def line_processor(line, text_processor):
     rating, text = (lambda x: (x[0], x[1]))(line.split('\t'))
-    return {'rating': rating, 'text': text, 'embedding': text_processor(text)}
+    return {'label': rating, 'text': text, 'embedding': text_processor(text)}
 
 
-def file_processor(path, text_processor, label):
+def file_processor(path, text_processor, annotator):
     data = []
     f = open(path, 'r')
     for line in f:
-        data.append({'label': label, **line_processor(line, text_processor)})
+        data.append({'annotator': annotator, **line_processor(line, text_processor)})
 
     return data
 
@@ -40,6 +40,8 @@ class TripAdvisorDataset(BaseDataset):
 
         data_f = file_processor(path_f, self.text_processor, 'f')
         data_m = file_processor(path_m, self.text_processor, 'm')
+
+        self.annotators = ['f', 'm']
 
         self.data = data_f + data_m
 

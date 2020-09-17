@@ -72,23 +72,27 @@ class Solver(object):
             f'learning rate: {self.learning_rate} - batch size: {self.batch_size}')
         for epoch in range(epochs):
             # TODO - loop over all annotators for training and do evaluation differently (maybe with latent truth??)
-            # training
-            self.dataset.set_mode('train')
-            train_loader = torch.utils.data.DataLoader(
-                self.dataset, batch_size=self.batch_size, collate_fn=collate_wrapper)
-            self.fit_epoch(model, optimizer, criterion,
-                           train_loader, epoch, loss_history)
+            for i in range(self.annotator_dim):
+                # switch to current annotator
+                self.dataset.annotator_filter(self.dataset.annotators[i])
 
-            # validation
-            self.dataset.set_mode('validation')
-            val_loader = torch.utils.data.DataLoader(
-                self.dataset, batch_size=self.batch_size, collate_fn=collate_wrapper)
-            if return_f1:
-                _, _, f1 = self.fit_epoch(model, optimizer, criterion,
-                                          val_loader, epoch, loss_history, mode='train', return_metrics=True)
-            else:
+                # training
+                self.dataset.set_mode('train')
+                train_loader = torch.utils.data.DataLoader(
+                    self.dataset, batch_size=self.batch_size, collate_fn=collate_wrapper)
                 self.fit_epoch(model, optimizer, criterion,
-                               val_loader, epoch, loss_history, mode='validation')
+                               train_loader, epoch, loss_history)
+
+                # validation
+                self.dataset.set_mode('validation')
+                val_loader = torch.utils.data.DataLoader(
+                    self.dataset, batch_size=self.batch_size, collate_fn=collate_wrapper)
+                if return_f1:
+                    _, _, f1 = self.fit_epoch(model, optimizer, criterion,
+                                              val_loader, epoch, loss_history, mode='train', return_metrics=True)
+                else:
+                    self.fit_epoch(model, optimizer, criterion,
+                                   val_loader, epoch, loss_history, mode='validation')
 
         self._print('Finished Training' + 20 * ' ')
         self._print('sum of first 10 losses: ', sum(loss_history[0:10]))

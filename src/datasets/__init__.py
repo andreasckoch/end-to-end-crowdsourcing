@@ -10,6 +10,7 @@ class BaseDataset(Dataset):
         self.argv = argv
 
         self.mode = 'train'
+        self.annotator_filter = ''
         self.train_val_split = argv.get('train_val_split', 0.8)
         self.device = torch.device(argv.get('device', 'cpu'))
 
@@ -62,15 +63,32 @@ class BaseDataset(Dataset):
         if mode not in ['train', 'validation', 'test']:
             raise Exception('mode must be train or validation or test')
         self.mode = mode
+        if self.annotator_filter is not '':
+            self.data_mask = [x['annotator'] == annotator_filter for x in data[self.mode]]
+
+    def annotator_filter(self, annotator_filter):
+        self.annotator_filter = annotator_filter
+        self.data_mask = [x['annotator'] == annotator_filter for x in data[self.mode]]
+
+    def no_annotator_filter(self):
+        self.annotator_filter = ''
+        self.data_mask = None
 
     def __len__(self):
-        return len(self.data[self.mode])
+        if self.annotator_filter is not '':
+            return len(self.data[self.mode][self.data_mask])
+        else:
+            return len(self.data[self.mode])
 
     def __getitem__(self, idx):
-        datapoint = self.data[self.mode][idx]
+        if self.annotator_filter is not '':
+            datapoint = self.data[self.mode][self.data_mask][idx]
+        else:
+            datapoint = self.data[self.mode][idx]
 
         # convert to torch tensor
         datapoint['embedding'] = torch.tensor(datapoint['embedding'], device=self.device, dtype=torch.float32)
+        datapoint['label'] = torch.tensor(datapoint['label'], device=self.device, dtype=torch.float32)
 
         return datapoint
 
