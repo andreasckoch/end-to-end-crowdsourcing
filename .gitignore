@@ -133,3 +133,5 @@ dmypy.json
 
 data/tripadvisor/**/*.txt
 data/embeddings/word2vec/*.txt
+models/*
+logs/*

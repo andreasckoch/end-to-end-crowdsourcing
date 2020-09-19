@@ -1,12 +1,8 @@
-import copy
-import datetime
-import time
-import itertools
 import torch
 import numpy as np
 import torch.nn as nn
 import torch.optim as optim
-import torch.nn.functional as f
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 
 from datasets.tripadvisor import TripAdvisorDataset
 from datasets import collate_wrapper
@@ -17,7 +13,7 @@ class Solver(object):
 
     def __init__(self, dataset, learning_rate, batch_size, momentum=0.9, model_weights_path='',
                  writer=None, device=torch.device('cpu'), verbose=True,
-                 embedding_dim=50, label_dim=2, annotator_dim=2, pretrained_model=None,
+                 embedding_dim=50, label_dim=5, annotator_dim=2, pretrained_model=None,
                  ):
         self.learning_rate = learning_rate
         self.batch_size = batch_size
@@ -84,7 +80,7 @@ class Solver(object):
                 train_loader = torch.utils.data.DataLoader(
                     self.dataset, batch_size=self.batch_size, collate_fn=collate_wrapper)
                 self.fit_epoch(model, optimizer, criterion,
-                               train_loader, annotator, epoch, loss_history)
+                               train_loader, annotator, i, epoch, loss_history)
 
                 # validation
                 self.dataset.set_mode('validation')
@@ -92,10 +88,10 @@ class Solver(object):
                     self.dataset, batch_size=self.batch_size, collate_fn=collate_wrapper)
                 if return_f1:
                     _, _, f1 = self.fit_epoch(model, optimizer, criterion,
-                                              val_loader, annotator, epoch, loss_history, mode='train', return_metrics=True)
+                                              val_loader, annotator, i, epoch, loss_history, mode='train', return_metrics=True)
                 else:
                     self.fit_epoch(model, optimizer, criterion,
-                                   val_loader, annotator, epoch, loss_history, mode='validation')
+                                   val_loader, annotator, i, epoch, loss_history, mode='validation')
 
         self._print('Finished Training' + 20 * ' ')
         self._print('sum of first 10 losses: ', sum(loss_history[0:10]))
@@ -106,7 +102,7 @@ class Solver(object):
 
         return model
 
-    def fit_epoch(self, model, opt, criterion, data_loader, annotator, epoch, loss_history, mode='train', return_metrics=False):
+    def fit_epoch(self, model, opt, criterion, data_loader, annotator, annotator_idx, epoch, loss_history, mode='train', return_metrics=False):
         mean_loss = 0.0
         mean_accuracy = 0.0
         mean_precision = 0.0
@@ -117,28 +113,32 @@ class Solver(object):
             # Prepare inputs to be passed to the model
             # Prepare labels for the Loss computation
             self._print(
-                f'Epoch {epoch}: Step {i} / {len_data_loader}', end='\r')
+                f'Annotator {annotator} - Epoch {epoch}: Step {i} / {len_data_loader}' + 10 * ' ', end='\r')
             inputs, labels = data.input, data.target
             opt.zero_grad()
 
             # Generate predictions
-            outputs = model(inputs).squeeze(1)
+            if annotator_idx is not None:
+                outputs = model(inputs)[annotator_idx]
+            else:
+                outputs = model(inputs)
 
             # Compute Loss:
-            loss = criterion(outputs.float(), labels.float())
+            loss = criterion(outputs.float(), labels)
 
             # performance measures of the batch
-            accuracy, precision, recall, f1 = self.performance_measures(outputs, labels, self.hinge_loss)
+            predictions = outputs.argmax(dim=1)
+            accuracy, precision, recall, f1 = self.performance_measures(predictions, labels)
 
             # statistics for logging
             current_batch_size = inputs.shape[0]
-            divisor = (i - 1) * batch_size + current_batch_size
-            mean_loss = ((i - 1) * batch_size * mean_loss +
+            divisor = (i - 1) * self.batch_size + current_batch_size
+            mean_loss = ((i - 1) * self.batch_size * mean_loss +
                          loss.item() * current_batch_size) / divisor
-            mean_accuracy = (mean_accuracy * batch_size * (i - 1) + accuracy.item() * current_batch_size) / divisor
-            mean_precision = (mean_precision * batch_size * (i - 1) + precision.item() * current_batch_size) / divisor
-            mean_recall = (mean_recall * batch_size * (i - 1) + recall.item() * current_batch_size) / divisor
-            mean_f1 = (mean_f1 * batch_size * (i - 1) + f1.item() * current_batch_size) / divisor
+            mean_accuracy = (mean_accuracy * self.batch_size * (i - 1) + accuracy.item() * current_batch_size) / divisor
+            mean_precision = (mean_precision * self.batch_size * (i - 1) + precision.item() * current_batch_size) / divisor
+            mean_recall = (mean_recall * self.batch_size * (i - 1) + recall.item() * current_batch_size) / divisor
+            mean_f1 = (mean_f1 * self.batch_size * (i - 1) + f1.item() * current_batch_size) / divisor
             loss_history.append(loss.item())
 
             if mode is 'train':
@@ -161,24 +161,16 @@ class Solver(object):
                 return mean_loss, mean_accuracy, mean_f1
 
     @staticmethod
-    def performance_measures(outputs, labels, hinge_loss=False):
-        if hinge_loss:
-            preds_mask = outputs > 0.0
-            labels_mask = labels > 0.0
-        else:
-            preds_mask = outputs > 0.5
-            labels_mask = labels > 0.5
-        true_positives = torch.ones_like(
-            labels)[preds_mask & labels_mask].sum()
-        true_negatives = torch.ones_like(
-            labels)[(preds_mask == False) & (labels_mask == False)].sum()
-        false_positives = torch.ones_like(
-            labels)[preds_mask & (labels_mask == False)].sum()
-        false_negatives = torch.ones_like(
-            labels)[(preds_mask == False) & labels_mask].sum()
-        batch_size = true_positives + true_negatives + false_positives + false_negatives
-        accuracy = (true_positives + true_negatives) / batch_size
-        precision = true_positives / (true_positives + false_positives)
-        recall = true_positives / (true_positives + false_negatives)
-        f1 = 2 * precision * recall / (precision + recall)
+    def performance_measures(predictions, labels):
+        if predictions.device.type == 'cuda' or labels.device.type == 'cuda':
+            predictions, labels = predictions.cpu(), labels.cpu()
+
+        # averaging for multiclass targets, can be one of [‘micro’, ‘macro’, ‘samples’, ‘weighted’]
+        accuracy = accuracy_score(labels, predictions)
+        average = 'weighted'
+        zero_division = 0
+        precision = precision_score(labels, predictions, average=average, zero_division=zero_division)
+        recall = recall_score(labels, predictions, average=average, zero_division=zero_division)
+        f1 = f1_score(labels, predictions, average=average, zero_division=zero_division)
+
         return accuracy, precision, recall, f1

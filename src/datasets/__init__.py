@@ -1,7 +1,8 @@
-from torch.utils.data import Dataset, DataLoader
-from itertools import compress
 import torch
 import numpy as np
+from itertools import compress
+
+from torch.utils.data import Dataset, DataLoader
 
 
 class BaseDataset(Dataset):
@@ -13,7 +14,7 @@ class BaseDataset(Dataset):
         self.mode = 'train'
         self.annotator_filter = ''
         self.train_val_split = argv.get('train_val_split', 0.8)
-        self.device = torch.device(argv.get('device', 'cpu'))
+        self.device = argv.get('device', torch.device('cpu'))
 
         self._build_text_processor(**argv)
         pass
@@ -91,10 +92,11 @@ class BaseDataset(Dataset):
             datapoint = self.data[self.mode][idx]
 
         # convert to torch tensor
-        datapoint['embedding'] = torch.tensor(datapoint['embedding'], device=self.device, dtype=torch.float32)
-        datapoint['label'] = torch.tensor(int(datapoint['label']), device=self.device, dtype=torch.float32)
+        out = datapoint.copy()
+        out['embedding'] = torch.tensor(datapoint['embedding'], device=self.device, dtype=torch.float32)
+        out['label'] = torch.tensor(int(datapoint['label']), device=self.device, dtype=torch.long)
 
-        return datapoint
+        return out
 
 
 class SimpleCustomBatch:

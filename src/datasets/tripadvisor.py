@@ -3,7 +3,8 @@ from datasets import BaseDataset
 
 def line_processor(line, text_processor):
     rating, text = (lambda x: (x[0], x[1]))(line.split('\t'))
-    return {'label': rating, 'text': text, 'embedding': text_processor(text)}
+    # one-hot encode ratings
+    return {'label': one_hot_encode_ratings(rating), 'text': text, 'embedding': text_processor(text)}
 
 
 def file_processor(path, text_processor, annotator):
@@ -13,6 +14,19 @@ def file_processor(path, text_processor, annotator):
         data.append({'annotator': annotator, **line_processor(line, text_processor)})
 
     return data
+
+
+def one_hot_encode_ratings(rating):
+    ratings_map = {
+        '-4': 0,
+        '-2': 1,
+        '0': 2,
+        '2': 3,
+        '4': 4,
+    }
+    if rating not in ratings_map.keys():
+        print(f'Rating not in map: {rating}')
+    return ratings_map[rating]
 
 
 class TripAdvisorDataset(BaseDataset):
