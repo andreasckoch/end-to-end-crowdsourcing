@@ -31,8 +31,8 @@ class Solver(object):
     def _get_model(self):
         model = Ipa2ltHead(self.embedding_dim, self.label_dim, self.annotator_dim)
         if self.model_weights_path is not '':
-            print(
-                f'Training model with weights of file {self.model_weights_path}')
+            # I don't know why, the line below is giving me problems... TODO
+            #print(f'Training model with weights of file {self.model_weights_path}')
             model.load_state_dict(torch.load(self.model_weights_path))
         model.to(self.device)
 
