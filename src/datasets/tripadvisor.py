@@ -48,7 +48,7 @@ class TripAdvisorDataset(BaseDataset):
             if stars not in ['2.0', '3.0', '4.0']:
                 raise Exception('Stars must be one of these: 2.0, 3.0, 4.0 or All')
 
-        root = f'../data/tripadvisor/{size} text files'
+        root = f'{self.root_data}tripadvisor/{size} text files'
         path_f = f'{root}/TripAdvisorUKHotels-{stars}-{size}_F.txt'
         path_m = f'{root}/TripAdvisorUKHotels-{stars}-{size}_M.txt'
 

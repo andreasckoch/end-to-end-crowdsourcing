@@ -15,6 +15,7 @@ class BaseDataset(Dataset):
         self.annotator_filter = ''
         self.train_val_split = argv.get('train_val_split', 0.8)
         self.device = argv.get('device', torch.device('cpu'))
+        self.root_data = argv.get('data_path', '../data/')
 
         self._build_text_processor(**argv)
         pass
