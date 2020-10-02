@@ -15,5 +15,5 @@ def get_model_path(path, stem, current_time, params, f1=0.0):
         path += '_{:1.5f}'.format(f1)
     for key, value in params.items():
         path += f'_{key}{value}'
-    path += f'_{current_time}.pt'
+    path += f'_{current_time}'
     return path

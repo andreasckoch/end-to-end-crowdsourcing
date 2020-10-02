@@ -1,4 +1,4 @@
-from .utils import initialize_weight
+from .utils import initialize_weight, initialize_bias_matrices
 from .basic import BasicNetwork
 
 import torch.nn as nn
@@ -14,7 +14,8 @@ class Ipa2ltHead(nn.Module):
         self.basic_network = BasicNetwork(embedding_dim, label_dim)
         self.bias_matrices = nn.ModuleList([nn.Linear(label_dim, label_dim, bias=False) for i in range(annotator_dim)])
 
-        self.apply(initialize_weight)
+        self.basic_network.apply(initialize_weight)
+        self.bias_matrices.apply(initialize_bias_matrices)
 
     def forward(self, x):
 

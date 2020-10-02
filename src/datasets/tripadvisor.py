@@ -11,18 +11,21 @@ def file_processor(path, text_processor, annotator):
     data = []
     f = open(path, 'r')
     for line in f:
-        data.append({'annotator': annotator, **line_processor(line, text_processor)})
+        processed_line = line_processor(line, text_processor)
+        if processed_line['label'] is not None:
+            data.append({'annotator': annotator, **processed_line})
 
     return data
 
 
 def one_hot_encode_ratings(rating):
+    # set to None if label is to be excluded
     ratings_map = {
         '-4': 0,
-        '-2': 1,
-        '0': 2,
-        '2': 3,
-        '4': 4,
+        '-2': 0,
+        '0': None,
+        '2': 1,
+        '4': 1,
     }
     if rating not in ratings_map.keys():
         print(f'Rating not in map: {rating}')
