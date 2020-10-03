@@ -19,7 +19,7 @@ output
 ```
 Dataset is in train mode
 Train-Validation split is 0.8
-1st train datapoint: {'label': 'f', 'rating': 4, 'text': 'I realise ...', 'embedding': array}
+1st train datapoint: {'label': 0, 'annotator':'f', 'rating': 4, 'text': 'I realise ...', 'embedding': array}
 ```
 
 
@@ -47,6 +47,6 @@ output
 ```
 Dataset is in train mode
 Train-Validation split is 0.8
-1st train datapoint: {'label': 0, 'anger_response':0, 'anger_label':0, 'anger_gold'=1, 'disgust_response':0 ... 'text': 'I realise ...', ... 'embedding': array}
-1st train datapoint: {'label': 1, 'anger_response':0, 'anger_label':0, 'anger_gold'=1, 'disgust_response':0 ... 'text': 'I realise ...', ... 'embedding': array}
+1st train datapoint: {'label': 0, 'annotator':'xxx1', 'anger_response':0, 'anger_label':0, 'anger_gold'=1, 'disgust_response':0 ... 'text': 'I realise ...', ... 'embedding': array}
+1st train datapoint: {'label': 1, 'annotator':'xxx1', 'anger_response':0, 'anger_label':0, 'anger_gold'=1, 'disgust_response':0 ... 'text': 'I realise ...', ... 'embedding': array}
 ```
