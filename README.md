@@ -2,6 +2,27 @@
 
 ## Databases
 
+#### How to use them from outside the src folder?
+
+It makes us able to refer to the classes properly.
+```python
+import sys
+sys.path.append("src/")
+```
+
+Pass the root folders of the embeddings and the data. 
+
+```python
+from datasets.emotion import EmotionDataset
+
+dataset = EmotionDataset(
+        text_processor='word2vec', 
+        text_processor_filters=['lowercase', 'stopwordsfilter'],
+        embedding_path='data/embeddings/word2vec/glove.6B.50d.txt',
+        data_path='data/'
+        )
+```
+
 ### TripAdvisor Dataset
 
 code
