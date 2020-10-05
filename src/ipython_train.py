@@ -10,6 +10,8 @@ from solver import Solver
 from datasets.tripadvisor import TripAdvisorDataset
 from utils import get_writer, get_model_path
 
+!pip install git+https://github.com/huggingface/transformers
+
 # Config
 EPOCHS = 15
 LOCAL_FOLDER = 'test'
