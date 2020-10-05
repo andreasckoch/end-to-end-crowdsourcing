@@ -1,5 +1,6 @@
 from .utils import initialize_weight
-
+from transformers import LongformerModel
+import torch
 import torch.nn as nn
 
 
@@ -14,7 +15,6 @@ class BasicNetwork(nn.Module):
         self.apply(initialize_weight)
 
     def forward(self, x):
-
         shape_len = len(x.shape)
 
         # sum up word vectors weighted by their word-wise attentions
@@ -32,5 +32,11 @@ class BasicNetwork(nn.Module):
 
         # apply sigmoid
         x = self.sigmoid(x)
+
+        """
+        model = LongformerModel.from_pretrained('allenai/longformer-base-4096')
+        output = model(input_ids=x)
+        x = output.last_hidden_state	# sequence_output
+        """
 
         return x

@@ -64,7 +64,7 @@ class Solver(object):
         labels = 0
         f1 = 0.0
 
-        # self._print('START TRAINING')
+        self._print('START TRAINING')
         self._print(
             f'learning rate: {self.learning_rate} - batch size: {self.batch_size}')
         for epoch in range(epochs):
@@ -112,6 +112,7 @@ class Solver(object):
         for i, data in enumerate(data_loader, 1):
             # Prepare inputs to be passed to the model
             # Prepare labels for the Loss computation
+
             self._print(
                 f'Annotator {annotator} - Epoch {epoch}: Step {i} / {len_data_loader}' + 10 * ' ', end='\r')
             inputs, labels = data.input, data.target
