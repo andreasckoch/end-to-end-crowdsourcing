@@ -25,7 +25,7 @@ def one_hot_encode_ratings(rating):
         '4': 4,
     }
     if rating not in ratings_map.keys():
-        print('Rating not in map: ', rating)
+        print(f'Rating not in map: {rating}')
     return ratings_map[rating]
 
 
@@ -48,9 +48,9 @@ class TripAdvisorDataset(BaseDataset):
             if stars not in ['2.0', '3.0', '4.0']:
                 raise Exception('Stars must be one of these: 2.0, 3.0, 4.0 or All')
 
-        root = '../data/tripadvisor/' + size + ' text files'
-        path_f = root + '/TripAdvisorUKHotels-' + stars + '-' + size + '_F.txt'
-        path_m = root + '/TripAdvisorUKHotels-' + stars + '-' + size + '_M.txt'
+        root = f'../data/tripadvisor/{size} text files'
+        path_f = f'{root}/TripAdvisorUKHotels-{stars}-{size}_F.txt'
+        path_m = f'{root}/TripAdvisorUKHotels-{stars}-{size}_M.txt'
 
         data_f = file_processor(path_f, self.text_processor, 'f')
         data_m = file_processor(path_m, self.text_processor, 'm')

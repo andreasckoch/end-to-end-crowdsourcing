@@ -31,7 +31,8 @@ class Solver(object):
     def _get_model(self):
         model = Ipa2ltHead(self.embedding_dim, self.label_dim, self.annotator_dim)
         if self.model_weights_path is not '':
-            print(f'Training model with weights of file {self.model_weights_path}')
+            print(
+                f'Training model with weights of file {self.model_weights_path}')
             model.load_state_dict(torch.load(self.model_weights_path))
         model.to(self.device)
 
@@ -63,8 +64,9 @@ class Solver(object):
         labels = 0
         f1 = 0.0
 
-        self._print('START TRAINING')
-        self._print('learning rate: {} - batch size: {}'.format{self.learning_rate, self.batch_size})
+        # self._print('START TRAINING')
+        self._print(
+            f'learning rate: {self.learning_rate} - batch size: {self.batch_size}')
         for epoch in range(epochs):
             # TODO - loop over all annotators for training and do evaluation differently (maybe with latent truth??)
             for i in range(self.annotator_dim):
@@ -110,7 +112,8 @@ class Solver(object):
         for i, data in enumerate(data_loader, 1):
             # Prepare inputs to be passed to the model
             # Prepare labels for the Loss computation
-            self._print('Annotator {} - Epoch {}: Step {} / {}'.format{annotator, epoch, i, len_data_loader} + 10 * ' ', end='\r')
+            self._print(
+                f'Annotator {annotator} - Epoch {epoch}: Step {i} / {len_data_loader}' + 10 * ' ', end='\r')
             inputs, labels = data.input, data.target
             opt.zero_grad()
 
@@ -145,16 +148,14 @@ class Solver(object):
                 # Optimization step
                 opt.step()
 
-            # I cant figure out why string format doesnt work:
-
-            # if self.writer is not None:
-            #     self.writer.add_scalar('Loss/Annotator {}/{}'.format{annotator, mode}, mean_loss, epoch)
-            #     self.writer.add_scalar(
-            #         'Accuracy/Annotator {}/{}'.format{annotator, mode}, mean_accuracy, epoch)
-            #     self.writer.add_scalar(
-            #         'Precision/Annotator {}/{}'.format{annotator, mode}, mean_precision, epoch)
-            #     self.writer.add_scalar('Recall/Annotator {}/{}'.format{annotator, mode}, mean_recall, epoch)
-            #     self.writer.add_scalar('F1 score/Annotator {}/{}'.format{annotator, mode}, mean_f1, epoch)
+            if self.writer is not None:
+                self.writer.add_scalar(f'Loss/Annotator {annotator}/{mode}', mean_loss, epoch)
+                self.writer.add_scalar(
+                    f'Accuracy/Annotator {annotator}/{mode}', mean_accuracy, epoch)
+                self.writer.add_scalar(
+                    f'Precision/Annotator {annotator}/{mode}', mean_precision, epoch)
+                self.writer.add_scalar(f'Recall/Annotator {annotator}/{mode}', mean_recall, epoch)
+                self.writer.add_scalar(f'F1 score/Annotator {annotator}/{mode}', mean_f1, epoch)
 
             if return_metrics:
                 return mean_loss, mean_accuracy, mean_f1
