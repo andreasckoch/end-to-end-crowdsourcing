@@ -1,6 +1,8 @@
-from .utils import initialize_weight
-from .basic import BasicNetwork
-from ..scripts.ipython_train import model
+import sys
+sys.path.append("..")
+from models.utils import initialize_weight
+from models.basic import BasicNetwork
+from scripts.ipython_train import model
 
 import torch.nn as nn
 import torch
