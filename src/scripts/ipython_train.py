@@ -7,8 +7,12 @@ from scipy.special import exp10
 from itertools import product
 
 from solver import Solver
-from datasets.tripadvisor import TripAdvisorDataset
 from utils import get_writer, get_model_path
+from datasets.tripadvisor import TripAdvisorDataset
+from transformers import LongformerModel, LongformerTokenizer
+
+model = LongformerModel.from_pretrained('allenai/longformer-base-4096', return_dict=True)
+tokenizer = LongformerTokenizer.from_pretrained('allenai/longformer-base-4096')
 
 # Config
 EPOCHS = 15

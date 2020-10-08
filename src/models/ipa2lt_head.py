@@ -1,5 +1,6 @@
 from .utils import initialize_weight
 from .basic import BasicNetwork
+from ..scripts.ipython_train import model
 
 import torch.nn as nn
 import torch
@@ -18,7 +19,8 @@ class Ipa2ltHead(nn.Module):
 
     def forward(self, x):
 
-        x = self.basic_network(x)
+        #x = self.basic_network(x)
+        x = model.forward(x)
         out = []
         for matrix in self.bias_matrices:
             # normalize rows of bias matrices
