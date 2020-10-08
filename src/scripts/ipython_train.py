@@ -42,8 +42,7 @@ for batch_size, lr in product(BATCH_SIZES, learning_rates):
     save_params = {'stem': STEM, 'current_time': current_time, 'hyperparams': hyperparams}
 
     # Training
-    solver = Solver(dataset, lr, batch_size, writer=writer, device=DEVICE, model_weights_path=MODEL_WEIGHTS_PATH,
-                    save_path_head=path, save_at=SAVE_MODEL_AT, save_params=save_params)
+    solver = Solver(dataset, lr, batch_size, writer=writer, device=DEVICE, save_path_head=path, save_at=SAVE_MODEL_AT, save_params=save_params)
     model, f1 = solver.fit(epochs=EPOCHS, return_f1=True, pretrained_basic=True)
 
     # Save model
