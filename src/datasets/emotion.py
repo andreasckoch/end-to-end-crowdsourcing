@@ -51,6 +51,8 @@ class EmotionDataset(BaseDataset):
             left, right, on=['!amt_annotation_ids', 'annotator', 'orig_id']), data)
 
         self.data = pd.merge(emotions, affect, how='left', left_on='orig_id', right_on='id')
+        
+        self.annotators = self.data.annotator.unique().tolist()
         self.data = self.data.to_dict('records')
 
         self.data_shuffle()
