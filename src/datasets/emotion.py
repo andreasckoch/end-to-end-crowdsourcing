@@ -81,5 +81,9 @@ class EmotionDataset(BaseDataset):
         out = datapoint.copy()
         out['embedding'] = torch.tensor(datapoint['embedding'], device=self.device, dtype=torch.float32)
         out['label'] = torch.tensor(int(datapoint[f'{self.emotion}_label']), device=self.device, dtype=torch.long)
+        
+        if self.pseudo_labels:
+            for pseudo_ann in datapoint['pseudo_labels'].keys():
+                out['pseudo_labels'][pseudo_ann] = torch.tensor(int(datapoint['pseudo_labels'][pseudo_ann]), device=self.device, dtype=torch.long)
 
         return out
