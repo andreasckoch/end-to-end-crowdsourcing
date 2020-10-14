@@ -17,7 +17,7 @@ class Solver(object):
                  writer=None, device=torch.device('cpu'), verbose=True,
                  embedding_dim=50, label_dim=2, annotator_dim=2,
                  save_path_head=None, save_at=None, save_params=None,
-                 pseudo_labels_model_paths=None,
+                 pseudo_annotators=None, pseudo_model_path_func=None, pseudo_func_args={},
                  ):
         self.learning_rate = learning_rate
         self.batch_size = batch_size
@@ -30,12 +30,16 @@ class Solver(object):
         self.save_path_head = save_path_head
         self.save_at = save_at
         self.save_params = save_params
-        self.pseudo_labels_model_paths = pseudo_labels_model_paths
         self.device = device
         self.writer = writer
         self.verbose = verbose
 
-        if pseudo_labels_model_paths is not None:
+        # List with pseudo annotators and separate function for getting a model path
+        self.pseudo_annotators = pseudo_annotators
+        self.pseudo_model_path_func = pseudo_model_path_func
+        self.pseudo_func_args = pseudo_func_args
+
+        if pseudo_annotators is not None:
             self._create_pseudo_labels()
 
     def _get_model(self, basic_only=False, pretrained_basic=False):
@@ -56,10 +60,13 @@ class Solver(object):
 
     def _create_pseudo_labels(self):
         model = BasicNetwork(self.embedding_dim, self.label_dim)
-        for ann in self.pseudo_labels_model_paths.keys():
-            model.load_state_dict(torch.load(self.pseudo_labels_model_paths[ann]['model_path']))
+        for pseudo_ann in self.pseudo_annotators:
+            model.load_state_dict(torch.load(self.pseudo_model_path_func(**self.pseudo_func_args, annotator=pseudo_ann)))
             model.to(self.device)
-            self.dataset.create_pseudo_labels(ann, self.pseudo_labels_model_paths[ann]['pseudo_annotator'], model)
+            annotator_list = self.dataset.annotators.copy()
+            annotator_list.remove(pseudo_ann)
+            for annotator in annotator_list:
+                self.dataset.create_pseudo_labels(annotator, pseudo_ann, model)
 
     def _print(self, *args, **kwargs):
 
@@ -130,6 +137,10 @@ class Solver(object):
                 val_loader = torch.utils.data.DataLoader(
                     self.dataset, batch_size=self.batch_size, collate_fn=collate_wrapper)
                 if return_f1:
+                    if len(val_loader) is 0:
+                        self.dataset.set_mode('train')
+                        val_loader = torch.utils.data.DataLoader(
+                            self.dataset, batch_size=self.batch_size, collate_fn=collate_wrapper)
                     _, _, f1 = self.fit_epoch(model, optimizer, criterion, val_loader, annotator, i,
                                               epoch, loss_history, mode='validation', return_metrics=True, no_annotator_head=no_annotator_head)
                 else:
@@ -225,8 +236,8 @@ class Solver(object):
                 self.writer.add_scalar(f'Recall/Annotator {annotator}/{mode}', mean_recall, epoch)
                 self.writer.add_scalar(f'F1 score/Annotator {annotator}/{mode}', mean_f1, epoch)
 
-            if return_metrics:
-                return mean_loss, mean_accuracy, mean_f1
+        if return_metrics:
+            return mean_loss, mean_accuracy, mean_f1
 
     def evaluate_model(self, output_file_path):
         model = self._get_model()

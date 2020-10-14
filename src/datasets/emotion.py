@@ -56,20 +56,25 @@ class EmotionDataset(BaseDataset):
         emotions = reduce(lambda left, right: pd.merge(
             left, right, on=['!amt_annotation_ids', 'annotator', 'orig_id']), data)
 
-        self.annotators = ['A1AVJRFM6L0RN8', 'ADAGUJNWMEPT6', 'A1LY3NJTYW9TFF', 'A14WWG6NKBDWGP', 'A1VYRD3HO2WDUN',
-                           'A1XUURRBT9RYFW', 'A1M0SEWUJYX9K0', 'A2KBTYNGUFRB9N', 'A3POYFULMTNW1H', 'ARQ4J4TLTPBNC']
-
         self.data = pd.merge(emotions, affect, how='left', left_on='orig_id', right_on='id')
-        
+
         self.annotators = self.data.annotator.unique().tolist()
         self.data = self.data.to_dict('records')
 
+        self.annotators = []
+        for point in self.data:
+            if point['annotator'] not in self.annotators:
+                self.annotators.append(point['annotator'])
+
         self.data_shuffle()
+
+        self.pseudo_labels_key = f'{self.emotion}_pseudo_labels'
 
     def set_emotion(self, emotion):
         if emotion not in self.emotions:
             raise Exception(f"Emotion must be one of these: \n{','.join(self.emotions)}")
         self.emotion = emotion
+        self.pseudo_labels_key = f'{self.emotion}_pseudo_labels'
 
     def __getitem__(self, idx):
         if self.annotator_filter is not '':
@@ -81,9 +86,11 @@ class EmotionDataset(BaseDataset):
         out = datapoint.copy()
         out['embedding'] = torch.tensor(datapoint['embedding'], device=self.device, dtype=torch.float32)
         out['label'] = torch.tensor(int(datapoint[f'{self.emotion}_label']), device=self.device, dtype=torch.long)
-        
-        if self.pseudo_labels:
-            for pseudo_ann in datapoint['pseudo_labels'].keys():
-                out['pseudo_labels'][pseudo_ann] = torch.tensor(int(datapoint['pseudo_labels'][pseudo_ann]), device=self.device, dtype=torch.long)
+
+        if datapoint[self.pseudo_labels_key] is None:
+            out[self.pseudo_labels_key] = {}
+        out['pseudo_labels'] = {}
+        for pseudo_ann in out[self.pseudo_labels_key].keys():
+            out['pseudo_labels'][pseudo_ann] = torch.tensor(int(datapoint[self.pseudo_labels_key][pseudo_ann]), device=self.device, dtype=torch.long)
 
         return out

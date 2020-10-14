@@ -16,7 +16,8 @@ class BaseDataset(Dataset):
         self.train_val_split = argv.get('train_val_split', 0.8)
         self.device = argv.get('device', torch.device('cpu'))
         self.root_data = argv.get('data_path', '../data/')
-        self.pseudo_labels = False
+
+        self.pseudo_labels_key = 'pseudo_labels'
 
         self._build_text_processor(**argv)
         pass
@@ -85,14 +86,13 @@ class BaseDataset(Dataset):
         # label each data point labeled by annotator with pseudo labels by pseduo_annotator / the model
         for mode in self.data.keys():
             for point in self.data[mode]:
-                if point['pseduo_labels'] is None:
-                    point['pseudo_labels'] = {}
-                if point['annotator'] is annotator and pseudo_annotator not in point['pseudo_labels'].keys():
+                if point[self.pseudo_labels_key] is None:
+                    point[self.pseudo_labels_key] = {}
+                if point['annotator'] is annotator and pseudo_annotator not in point[self.pseudo_labels_key].keys():
                     inp = torch.tensor(point['embedding'], device=self.device, dtype=torch.float32)
                     pseudo_label = model(inp).argmax().cpu().numpy().item()
-                    point['pseudo_labels'][pseudo_annotator] = pseudo_label
+                    point[self.pseudo_labels_key][pseudo_annotator] = pseudo_label
 
-        self.pseudo_labels = True
         if self.annotator_filter is not '':
             self.data_mask = [x['annotator'] == self.annotator_filter for x in self.data[self.mode]]
 
@@ -112,9 +112,10 @@ class BaseDataset(Dataset):
         out = datapoint.copy()
         out['embedding'] = torch.tensor(datapoint['embedding'], device=self.device, dtype=torch.float32)
         out['label'] = torch.tensor(int(datapoint['label']), device=self.device, dtype=torch.long)
-        if self.pseudo_labels:
-            for pseudo_ann in datapoint['pseudo_labels'].keys():
-                out['pseudo_labels'][pseudo_ann] = torch.tensor(int(datapoint['pseudo_labels'][pseudo_ann]), device=self.device, dtype=torch.long)
+        if datapoint['pseudo_labels'] is None:
+            out['pseudo_labels'] = {}
+        for pseudo_ann in out['pseudo_labels'].keys():
+            out['pseudo_labels'][pseudo_ann] = torch.tensor(int(datapoint['pseudo_labels'][pseudo_ann]), device=self.device, dtype=torch.long)
 
         return out
 
