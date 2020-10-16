@@ -135,5 +135,5 @@ data/tripadvisor/**/*.txt
 data/embeddings/word2vec/*.txt
 models/*
 logs/*
-
+src/logs/*
 src/aclImdb/*
