@@ -4,7 +4,7 @@ import torch.nn as nn
 
 
 class BasicNetwork(nn.Module):
-    def __init__(self, embedding_dim, label_dim, use_softmax=False):
+    def __init__(self, embedding_dim, label_dim):
         super().__init__()
 
         self.attention = nn.Linear(embedding_dim, 1, bias=False)
@@ -12,8 +12,6 @@ class BasicNetwork(nn.Module):
         self.softmax_batch = nn.Softmax(dim=1)
         self.softmax = nn.Softmax(dim=0)
         self.sigmoid = nn.Sigmoid()
-
-        self.use_softmax = use_softmax
 
         self.apply(initialize_weight)
 
@@ -34,13 +32,9 @@ class BasicNetwork(nn.Module):
         # feed it to the classifier
         x = self.classifier(x)
 
-        # apply softmax or sigmoid
-        if self.use_softmax:
-            if shape_len is 3:
-                x = self.softmax_batch(x)
-            elif shape_len is 2:
-                x = self.softmax(x)
-        else:
-            x = self.sigmoid(x)
+        if shape_len is 3:
+            x = self.softmax_batch(x)
+        elif shape_len is 2:
+            x = self.softmax(x)
 
         return x
