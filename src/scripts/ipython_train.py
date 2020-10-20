@@ -9,18 +9,21 @@ from itertools import product
 from solver import Solver
 from datasets.tripadvisor import TripAdvisorDataset
 from datasets.emotion import EmotionDataset
-from utils import get_writer, get_model_path, get_pseudo_model_path
+from utils import get_writer, get_model_path, get_pseudo_model_path, get_pseudo_model_path_tripadvisor
 
 # Config
-EPOCHS = 1000
-SAVE_MODEL_AT = [10, 100, 500]
-LOCAL_FOLDER = 'train_10_14/full_training'
-MODEL_WEIGHTS_PATH = '../models/train_10_14/pretraining/anger/0.71349_batch64_lr0.0007857831487185887_20201014-170508_epoch1000.pt'
-PSEUDO_ROOT_PATH = '../models/train_10_14/individual_training'
+EPOCHS = 300
+SAVE_MODEL_AT = [10, 100, 200]
+LOCAL_FOLDER = 'train_10_17/tripadvisor/full_training_good_model_fix_base_softmax'
+MODEL_WEIGHTS_PATH = '../models/train_10_17/tripadvisor/pretraining_softmax/' + \
+    '0.88136_batch64_lr0.00031867445707134466_20201019-092128_epoch300.pt'
+PSEUDO_ROOT_PATH = '../models/train_09_24'
 
 STEM = ''
-LABEL_DIM = 3
-ANNOTATOR_DIM = 38
+LABEL_DIM = 2
+ANNOTATOR_DIM = 2
+USE_SOFTMAX = True
+AVERAGING_METHOD = 'macro'
 LR_INT = [1e-6, 1e-3]
 NUM_DRAWS = 20
 BATCH_SIZES = [64]
@@ -29,13 +32,13 @@ DEVICE = torch.device('cuda')
 
 # Setup
 learning_rates = exp10(-np.random.uniform(-np.log10(LR_INT[0]), -np.log10(LR_INT[1]), size=NUM_DRAWS))
-dataset = EmotionDataset(device=DEVICE)
-# dataset = TripAdvisorDataset(device=DEVICE)
+# dataset = EmotionDataset(device=DEVICE)
+dataset = TripAdvisorDataset(device=DEVICE)
 
 # Emotions Loop (comment out as needed)
 # for emotion in dataset.emotions:
-emotion = 'anger'
-dataset.set_emotion(emotion)
+# emotion = 'anger'
+# dataset.set_emotion(emotion)
 
 # # Annotator Loop (comment out as needed)
 # for annotator in dataset.annotators:
@@ -43,7 +46,7 @@ dataset.set_emotion(emotion)
 # Training Loop
 for batch_size, lr in product(BATCH_SIZES, learning_rates):
     # sub path
-    sub_path = f'{LOCAL_FOLDER}/{emotion}/'  # {annotator}/'
+    sub_path = f'{LOCAL_FOLDER}/'  # {annotator}/'  # {emotion}/'
 
     # For Documentation
     current_time = datetime.datetime.now(pytz.timezone('Europe/Berlin')).strftime("%Y%m%d-%H%M%S")
@@ -63,11 +66,12 @@ for batch_size, lr in product(BATCH_SIZES, learning_rates):
 
     solver = Solver(dataset, lr, batch_size, writer=writer, device=DEVICE, model_weights_path=MODEL_WEIGHTS_PATH,
                     save_path_head=path, save_at=SAVE_MODEL_AT, save_params=save_params, label_dim=LABEL_DIM,
-                    annotator_dim=ANNOTATOR_DIM,
+                    annotator_dim=ANNOTATOR_DIM, averaging_method=AVERAGING_METHOD, use_softmax=USE_SOFTMAX,
                     pseudo_annotators=dataset.annotators,
-                    pseudo_model_path_func=get_pseudo_model_path,
-                    pseudo_func_args={'pseudo_root': PSEUDO_ROOT_PATH, 'emotion': emotion})
-    model, f1 = solver.fit(epochs=EPOCHS, return_f1=True, pretrained_basic=True)
+                    pseudo_model_path_func=get_pseudo_model_path_tripadvisor,
+                    pseudo_func_args={'pseudo_root': PSEUDO_ROOT_PATH}  # 'emotion': emotion})
+                    )
+    model, f1 = solver.fit(epochs=EPOCHS, return_f1=True, pretrained_basic=True, fix_base=True)
 
     # Save model
     model_path = get_model_path(path, STEM, current_time, hyperparams, f1)
