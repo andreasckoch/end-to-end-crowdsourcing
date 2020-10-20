@@ -28,9 +28,20 @@ def emotion_file_processor(path, emotion):
     return data
 
 
-def encode_scores(score, maximum_value=100, num_of_classes=3):
+def encode_scores(score, maximum_value=100, starting_value=-100, num_of_classes=3, separate_zero_class_idx=1):
+    """
+    Ranges for all emotions: [0, 100]
+    Exception is 'valence' with: [-100, 100]
+    """
     step = maximum_value * 2 / num_of_classes
-    ranges = [{'start': - maximum_value + i * step, 'end': -maximum_value + (i + 1) * step} for i in range(num_of_classes)]
+    ranges = [{'start': starting_value + i * step, 'end': starting_value + (i + 1) * step} for i in range(num_of_classes)]
+    if separate_zero_class_idx is not None:
+        ranges[separate_zero_class_idx] = {'start': 0, 'end': 0}
+        ranges[separate_zero_class_idx - 1] = {'start': ranges[separate_zero_class_idx - 1]['start'], 'end': 0}
+        ranges[separate_zero_class_idx + 1] = {'start': 0, 'end': ranges[separate_zero_class_idx + 1]['end']}
+        if score is 0:
+            return separate_zero_class_idx
+
     for idx, ran in enumerate(ranges):
         if score >= ran['start'] and score <= ran['end']:
             return idx
@@ -60,11 +71,6 @@ class EmotionDataset(BaseDataset):
 
         self.annotators = self.data.annotator.unique().tolist()
         self.data = self.data.to_dict('records')
-
-        self.annotators = []
-        for point in self.data:
-            if point['annotator'] not in self.annotators:
-                self.annotators.append(point['annotator'])
 
         self.data_shuffle()
 

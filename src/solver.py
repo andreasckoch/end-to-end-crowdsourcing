@@ -15,8 +15,8 @@ class Solver(object):
 
     def __init__(self, dataset, learning_rate, batch_size, momentum=0.9, model_weights_path='',
                  writer=None, device=torch.device('cpu'), verbose=True,
-                 embedding_dim=50, label_dim=2, annotator_dim=2,
-                 save_path_head=None, save_at=None, save_params=None,
+                 embedding_dim=50, label_dim=2, annotator_dim=2, averaging_method='macro',
+                 save_path_head=None, save_at=None, save_params=None, use_softmax=False,
                  pseudo_annotators=None, pseudo_model_path_func=None, pseudo_func_args={},
                  ):
         self.learning_rate = learning_rate
@@ -33,6 +33,8 @@ class Solver(object):
         self.device = device
         self.writer = writer
         self.verbose = verbose
+        self.averaging_method = averaging_method
+        self.use_softmax = use_softmax
 
         # List with pseudo annotators and separate function for getting a model path
         self.pseudo_annotators = pseudo_annotators
@@ -44,9 +46,9 @@ class Solver(object):
 
     def _get_model(self, basic_only=False, pretrained_basic=False):
         if not basic_only:
-            model = Ipa2ltHead(self.embedding_dim, self.label_dim, self.annotator_dim)
+            model = Ipa2ltHead(self.embedding_dim, self.label_dim, self.annotator_dim, use_softmax=self.use_softmax)
         else:
-            model = BasicNetwork(self.embedding_dim, self.label_dim)
+            model = BasicNetwork(self.embedding_dim, self.label_dim, use_softmax=self.use_softmax)
         if self.model_weights_path is not '':
             print(
                 f'Training model with weights of file {self.model_weights_path}')
@@ -59,7 +61,7 @@ class Solver(object):
         return model
 
     def _create_pseudo_labels(self):
-        model = BasicNetwork(self.embedding_dim, self.label_dim)
+        model = BasicNetwork(self.embedding_dim, self.label_dim, use_softmax=self.use_softmax)
         for pseudo_ann in self.pseudo_annotators:
             model.load_state_dict(torch.load(self.pseudo_model_path_func(**self.pseudo_func_args, annotator=pseudo_ann)))
             model.to(self.device)
@@ -201,7 +203,7 @@ class Solver(object):
 
             # performance measures of the batch
             predictions = outputs.argmax(dim=1)
-            accuracy, precision, recall, f1 = self.performance_measures(predictions, labels)
+            accuracy, precision, recall, f1 = self.performance_measures(predictions, labels, self.averaging_method)
 
             # statistics for logging
             current_batch_size = inputs.shape[0]
@@ -239,7 +241,7 @@ class Solver(object):
         if return_metrics:
             return mean_loss, mean_accuracy, mean_f1
 
-    def evaluate_model(self, output_file_path):
+    def evaluate_model(self, output_file_path, labels=None):
         model = self._get_model()
 
         # write annotation bias matrices into log file
@@ -252,8 +254,25 @@ class Solver(object):
             acc_out = ''
             bias_out = 'Annotation bias matrices\n\n'
             for i, annotator in enumerate(self.dataset.annotators):
-                bias_out += f'Annotator {annotator}\n{model.bias_matrices[i].weight.cpu().detach().numpy()}\n\n'
+                bias_out += f'Annotator {annotator}\n'
+                bias_out += f'Output\\LatentTruth'
+                if labels is not None:
+                    for label in labels:
+                        bias_out += '\t' * 3 + f'{label}'
+                    bias_out += '\n'
+                    for j, label in enumerate(labels):
+                        bias_out += f'{label}' + ' ' * (15 - len(label))
+                        for k, label_2 in enumerate(labels):
+                            bias_out += '\t' * 3 + f'{model.bias_matrices[i].weight[j][k].cpu().detach().numpy(): .4f}'
+                        bias_out += '\n'
+                    bias_out += '\n'
+                else:
+                    bias_out += f'{model.bias_matrices[i].weight.cpu().detach().numpy()}\n\n'
+
                 correct = {ann: 0 for ann in self.dataset.annotators}
+
+                different_answers = 0
+                different_answers_idx = []
 
                 self.dataset.set_annotator_filter(annotator)
                 # batch_size needs to be 1
@@ -269,7 +288,7 @@ class Solver(object):
                     output = model(inp)
 
                     # print input/output
-                    out_text += f'Label by {annotator}: {label.cpu().numpy()} - Latent truth {latent_truth.cpu().detach().numpy()}'
+                    out_text += f'Point {i} - Label by {annotator}: {label.cpu().numpy()} - Latent truth {latent_truth.cpu().detach().numpy()}'
                     predictions = {}
                     for idx, ann in enumerate(self.dataset.annotators):
                         out_text += f' - Annotator {ann} {output[idx].cpu().detach().numpy()}'
@@ -281,31 +300,45 @@ class Solver(object):
                         if predictions[ann][0] == label:
                             # annotator_highest_pred = max(filtered_preds, key=filtered_preds.get)
                             correct[ann] += 1
+                    predictions_set = set([predictions[ann][0].cpu().detach().numpy().item(0) for ann in self.dataset.annotators])
+                    if len(predictions_set) is not 1:
+                        different_answers += 1
+                        different_answers_idx.append(i)
 
                     out_text += '\n'
 
                 # Document correct predictions
-                acc_out += f'Accuracy of samples labeled by {annotator}\n'
+                all_same_accuracies = set([correct[ann] for ann in self.dataset.annotators])
+                acc_out += '-' * 25 + f'   Annotator {annotator}   ' + '-' * 25 + '\n'
+                acc_out += f'Different answers given by bias matrices {different_answers} / {len(self.dataset)} times\n'
+                acc_out += f'Different answers at points: {different_answers_idx[:min(5, len(different_answers_idx))]}\n'
+                acc_out += f'Accuracies of samples labeled by {annotator}:'
+                # ' has {len(all_same_accuracies)} '
+                # if len(all_same_accuracies) is 1:
+                #     acc_out += 'answer\n'
+                # else:
+                #     acc_out += 'different answers\n'
+                acc_out += '\n'
                 for ann in self.dataset.annotators:
                     acc_out += f'Annotator {ann}: {correct[ann]} / {len(self.dataset)}     '
                 acc_out += '\n\n'
 
             print(bias_out)
             print(acc_out)
+            print('\n' * 30)
             print(out_text)
             sys.stdout = original_stdout
 
     @staticmethod
-    def performance_measures(predictions, labels):
+    def performance_measures(predictions, labels, averaging_method='macro'):
         if predictions.device.type == 'cuda' or labels.device.type == 'cuda':
             predictions, labels = predictions.cpu(), labels.cpu()
 
         # averaging for multiclass targets, can be one of [‘micro’, ‘macro’, ‘samples’, ‘weighted’]
         accuracy = accuracy_score(labels, predictions)
-        average = 'macro'
         zero_division = 0
-        precision = precision_score(labels, predictions, average=average, zero_division=zero_division)
-        recall = recall_score(labels, predictions, average=average, zero_division=zero_division)
-        f1 = f1_score(labels, predictions, average=average, zero_division=zero_division)
+        precision = precision_score(labels, predictions, average=averaging_method, zero_division=zero_division)
+        recall = recall_score(labels, predictions, average=averaging_method, zero_division=zero_division)
+        f1 = f1_score(labels, predictions, average=averaging_method, zero_division=zero_division)
 
         return accuracy, precision, recall, f1
