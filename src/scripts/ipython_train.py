@@ -9,7 +9,7 @@ from itertools import product
 from solver import Solver
 from datasets.tripadvisor import TripAdvisorDataset
 from datasets.emotion import EmotionDataset
-from utils import get_writer, get_model_path, get_pseudo_model_path, get_pseudo_model_path_tripadvisor
+from utils import *
 
 # Config
 EPOCHS = 300
