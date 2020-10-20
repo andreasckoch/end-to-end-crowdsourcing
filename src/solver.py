@@ -15,8 +15,9 @@ class Solver(object):
 
     def __init__(self, dataset, learning_rate, batch_size, momentum=0.9, model_weights_path='',
                  writer=None, device=torch.device('cpu'), verbose=True,
-                 embedding_dim=50, label_dim=2, annotator_dim=2, pretrained_model=None,
-                 save_path_head=None, save_at=None, save_params=None
+                 embedding_dim=50, label_dim=2, annotator_dim=2,
+                 save_path_head=None, save_at=None, save_params=None,
+                 pseudo_annotators=None, pseudo_model_path_func=None, pseudo_func_args={},
                  ):
         self.learning_rate = learning_rate
         self.batch_size = batch_size
@@ -32,7 +33,14 @@ class Solver(object):
         self.device = device
         self.writer = writer
         self.verbose = verbose
-        self.pretrained_model = pretrained_model
+
+        # List with pseudo annotators and separate function for getting a model path
+        self.pseudo_annotators = pseudo_annotators
+        self.pseudo_model_path_func = pseudo_model_path_func
+        self.pseudo_func_args = pseudo_func_args
+
+        if pseudo_annotators is not None:
+            self._create_pseudo_labels()
 
     def _get_model(self, basic_only=False, pretrained_basic=False):
         if not basic_only:
@@ -49,6 +57,16 @@ class Solver(object):
         model.to(self.device)
 
         return model
+
+    def _create_pseudo_labels(self):
+        model = BasicNetwork(self.embedding_dim, self.label_dim)
+        for pseudo_ann in self.pseudo_annotators:
+            model.load_state_dict(torch.load(self.pseudo_model_path_func(**self.pseudo_func_args, annotator=pseudo_ann)))
+            model.to(self.device)
+            annotator_list = self.dataset.annotators.copy()
+            annotator_list.remove(pseudo_ann)
+            for annotator in annotator_list:
+                self.dataset.create_pseudo_labels(annotator, pseudo_ann, model)
 
     def _print(self, *args, **kwargs):
 
@@ -97,7 +115,7 @@ class Solver(object):
                     annotator = single_annotator
                     self.dataset.set_annotator_filter(annotator)
                     no_annotator_head = True
-                elif basic_only:
+                elif single_annotator is None and basic_only:
                     annotator = 'all'
                     self.dataset.no_annotator_filter()
                     no_annotator_head = True
@@ -119,6 +137,10 @@ class Solver(object):
                 val_loader = torch.utils.data.DataLoader(
                     self.dataset, batch_size=self.batch_size, collate_fn=collate_wrapper)
                 if return_f1:
+                    if len(val_loader) is 0:
+                        self.dataset.set_mode('train')
+                        val_loader = torch.utils.data.DataLoader(
+                            self.dataset, batch_size=self.batch_size, collate_fn=collate_wrapper)
                     _, _, f1 = self.fit_epoch(model, optimizer, criterion, val_loader, annotator, i,
                                               epoch, loss_history, mode='validation', return_metrics=True, no_annotator_head=no_annotator_head)
                 else:
@@ -161,12 +183,16 @@ class Solver(object):
             # Prepare labels for the Loss computation
             self._print(
                 f'Annotator {annotator} - Epoch {epoch}: Step {i} / {len_data_loader}' + 10 * ' ', end='\r')
-            inputs, labels = data.input, data.target
+            inputs, labels, pseudo_labels = data.input, data.target, data.pseudo_targets
             opt.zero_grad()
 
             # Generate predictions
             if annotator_idx is not None:
                 outputs = model(inputs)[annotator_idx]
+                if len(pseudo_labels) is not 0:
+                    outputs_pseudo_labels = model(inputs)
+                    losses = [criterion(outputs_pseudo_labels[self.dataset.annotators.index(ann)].float(), pseudo_labels[ann])
+                              for ann in pseudo_labels.keys()]
             else:
                 outputs = model(inputs)
 
@@ -190,7 +216,13 @@ class Solver(object):
 
             if mode is 'train':
                 # Update gradients
-                loss.backward()
+                if annotator_idx is not None and len(pseudo_labels) is not 0:
+                    final_loss = loss
+                    for pseudo_loss in losses:
+                        final_loss += pseudo_loss
+                    final_loss.backward()
+                else:
+                    loss.backward()
 
                 # Optimization step
                 opt.step()
@@ -204,12 +236,11 @@ class Solver(object):
                 self.writer.add_scalar(f'Recall/Annotator {annotator}/{mode}', mean_recall, epoch)
                 self.writer.add_scalar(f'F1 score/Annotator {annotator}/{mode}', mean_f1, epoch)
 
-            if return_metrics:
-                return mean_loss, mean_accuracy, mean_f1
+        if return_metrics:
+            return mean_loss, mean_accuracy, mean_f1
 
     def evaluate_model(self, output_file_path):
-        if self.pretrained_model is None:
-            model = self._get_model()
+        model = self._get_model()
 
         # write annotation bias matrices into log file
         import sys

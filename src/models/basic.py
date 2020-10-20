@@ -9,6 +9,8 @@ class BasicNetwork(nn.Module):
 
         self.attention = nn.Linear(embedding_dim, 1, bias=False)
         self.classifier = nn.Linear(embedding_dim, label_dim)
+        self.softmax_batch = nn.Softmax(dim=1)
+        self.softmax = nn.Softmax(dim=0)
         self.sigmoid = nn.Sigmoid()
 
         self.apply(initialize_weight)
@@ -30,7 +32,9 @@ class BasicNetwork(nn.Module):
         # feed it to the classifier
         x = self.classifier(x)
 
-        # apply sigmoid
-        x = self.sigmoid(x)
+        if shape_len is 3:
+            x = self.softmax_batch(x)
+        elif shape_len is 2:
+            x = self.softmax(x)
 
         return x

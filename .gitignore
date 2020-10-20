@@ -132,6 +132,7 @@ dmypy.json
 .vscode
 
 data/tripadvisor/**/*.txt
+data/emotion/*
 data/embeddings/word2vec/*.txt
 models/*
 logs/*

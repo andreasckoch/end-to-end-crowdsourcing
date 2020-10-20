@@ -17,6 +17,8 @@ class BaseDataset(Dataset):
         self.device = argv.get('device', torch.device('cpu'))
         self.root_data = argv.get('data_path', '../data/')
 
+        self.pseudo_labels_key = 'pseudo_labels'
+
         self._build_text_processor(**argv)
         pass
 
@@ -80,6 +82,20 @@ class BaseDataset(Dataset):
         self.annotator_filter = ''
         self.data_mask = None
 
+    def create_pseudo_labels(self, annotator, pseudo_annotator, model):
+        # label each data point labeled by annotator with pseudo labels by pseduo_annotator / the model
+        for mode in self.data.keys():
+            for point in self.data[mode]:
+                if point[self.pseudo_labels_key] is None:
+                    point[self.pseudo_labels_key] = {}
+                if point['annotator'] is annotator and pseudo_annotator not in point[self.pseudo_labels_key].keys():
+                    inp = torch.tensor(point['embedding'], device=self.device, dtype=torch.float32)
+                    pseudo_label = model(inp).argmax().cpu().numpy().item()
+                    point[self.pseudo_labels_key][pseudo_annotator] = pseudo_label
+
+        if self.annotator_filter is not '':
+            self.data_mask = [x['annotator'] == self.annotator_filter for x in self.data[self.mode]]
+
     def __len__(self):
         if self.annotator_filter is not '':
             return len([x for x in compress(self.data[self.mode], self.data_mask)])
@@ -96,6 +112,10 @@ class BaseDataset(Dataset):
         out = datapoint.copy()
         out['embedding'] = torch.tensor(datapoint['embedding'], device=self.device, dtype=torch.float32)
         out['label'] = torch.tensor(int(datapoint['label']), device=self.device, dtype=torch.long)
+        if datapoint['pseudo_labels'] is None:
+            out['pseudo_labels'] = {}
+        for pseudo_ann in out['pseudo_labels'].keys():
+            out['pseudo_labels'][pseudo_ann] = torch.tensor(int(datapoint['pseudo_labels'][pseudo_ann]), device=self.device, dtype=torch.long)
 
         return out
 
@@ -109,6 +129,12 @@ class SimpleCustomBatch:
     def __init__(self, data, device):
         self.input = torch.stack([sample['embedding'] for sample in data]).to(device=device)
         self.target = torch.stack([sample['label'] for sample in data]).to(device=device)
+
+        if 'pseudo_labels' in data[0].keys():
+            self.pseudo_targets = {ann: torch.stack([sample['pseudo_labels'][ann] for sample in data]).to(device=device)
+                                   for ann in data[0]['pseudo_labels'].keys()}
+        else:
+            self.pseudo_targets = {}
 
     def pin_memory(self):
         self.input = self.input.pin_memory()

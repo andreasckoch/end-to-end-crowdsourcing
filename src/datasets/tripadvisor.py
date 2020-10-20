@@ -13,7 +13,7 @@ def file_processor(path, text_processor, annotator):
     for line in f:
         processed_line = line_processor(line, text_processor)
         if processed_line['label'] is not None:
-            data.append({'annotator': annotator, **processed_line})
+            data.append({'annotator': annotator, 'pseudo_labels': {}, **processed_line})
 
     return data
 
@@ -59,7 +59,6 @@ class TripAdvisorDataset(BaseDataset):
         data_m = file_processor(path_m, self.text_processor, 'm')
 
         self.annotators = ['f', 'm']
-
         self.data = data_f + data_m
 
         self.data_shuffle()
