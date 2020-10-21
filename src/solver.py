@@ -6,11 +6,10 @@ from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_sc
 
 from transformers import LongformerModel, LongformerTokenizerFast
 from datasets.tripadvisor import TripAdvisorDataset
-from datasets import collate_wrapper
+from datasets import collate_wrapper, collate_wrapper_transformers
 from models.ipa2lt_head import Ipa2ltHead
 from models.basic import BasicNetwork
 from utils import get_model_path, adapt_dataset_for_trafo
-
 
 class Solver(object):
 
@@ -142,8 +141,8 @@ class Solver(object):
                     self.dataset.set_annotator_filter(annotator)
                     no_annotator_head = False
 
-                
-                ## CHECK IF COLLATE_WRAPPER GIVES PROBLEMS. SHOULD I READJUST IT?
+                ## COLLATE IS GIVING PROBLEMS:
+                ## TODO: Fix collate_wrapper_transformers and SimpleCustomBatch_transformers in datasets
                 
                 # training
                 self.dataset.set_mode('train')
@@ -151,9 +150,10 @@ class Solver(object):
                     model.to(self.device)
                     model.train()
                     transformer_specific_dataset = adapt_dataset_for_trafo(self.dataset, self.tokenizer)
-                    train_loader = torch.utils.data.DataLoader(
-                        transformer_specific_dataset, batch_size=self.batch_size, collate_fn=collate_wrapper)
-                else:
+                    train_loader = torch.utils.data.DataLoader(transformer_specific_dataset, batch_size=self.batch_size,
+                                                               collate_fn=collate_wrapper_transformers)
+                    
+                else: # if basic and/or ipa
                     train_loader = torch.utils.data.DataLoader(
                         self.dataset, batch_size=self.batch_size, collate_fn=collate_wrapper)
                     
@@ -165,8 +165,9 @@ class Solver(object):
                 if baseline==2: # if longformer
                     transformer_specific_dataset = adapt_dataset_for_trafo(self.dataset, self.tokenizer)
                     val_loader = torch.utils.data.DataLoader(transformer_specific_dataset, batch_size=self.batch_size,
-                                                             collate_fn=collate_wrapper)
-                else:
+                                                             collate_fn=collate_wrapper_transformers)
+                        
+                else: # if basic and/or ipa
                     val_loader = torch.utils.data.DataLoader(
                         self.dataset, batch_size=self.batch_size, collate_fn=collate_wrapper)
                     
@@ -176,7 +177,8 @@ class Solver(object):
                         if baseline==2:
                             transformer_specific_dataset = adapt_dataset_for_trafo(self.dataset, self.tokenizer)
                             val_loader = torch.utils.data.DataLoader(transformer_specific_dataset, batch_size=self.batch_size,
-                                                                     collate_fn=collate_wrapper)
+                                                                     collate_fn=collate_wrapper_transformers)
+                            
                         else:
                             val_loader = torch.utils.data.DataLoader(
                                 self.dataset, batch_size=self.batch_size, collate_fn=collate_wrapper)
@@ -185,7 +187,6 @@ class Solver(object):
                 else:
                     self.fit_epoch(model, optimizer, criterion, val_loader, annotator, i, epoch, loss_history,
                                    mode='validation', no_annotator_head=no_annotator_head, baseline=baseline)
-
             if self.save_at is not None and self.save_path_head is not None and self.save_params is not None:
                 if epoch in self.save_at:
                     params = self.save_params
@@ -217,14 +218,14 @@ class Solver(object):
         mean_recall = 0.0
         mean_f1 = 0.0
         len_data_loader = len(data_loader)
-        print('len_data_loader: ', len_data_loader)
         for i, data in enumerate(data_loader, 1):
             # Prepare inputs to be passed to the model
             # Prepare labels for the Loss computation
             
             opt.zero_grad()
-                       
-            if baseline==2:    # TRANSFORMER APPROACH
+            
+            # Transformer approach
+            if baseline==2:
                 self._print(f'Model: Longformer. Annotator {annotator} - Epoch {epoch}: Step {i} / {len_data_loader}' + 10 * ' ', end='\r')
                 inputs_ids = batch['input_ids'].to(self.device)
                 attention_mask = batch['attention_mask'].to(self.device)
@@ -238,7 +239,7 @@ class Solver(object):
                 # Compute Loss:
                 loss = outputs[0]
                 
-            else:              # BASIC APPROACH
+            else:
                 self._print(f'Annotator {annotator} - Epoch {epoch}: Step {i} / {len_data_loader}' + 10 * ' ', end='\r')
                 inputs, labels, pseudo_labels = data.input, data.target, data.pseudo_targets
 

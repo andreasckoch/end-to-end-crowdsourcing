@@ -70,7 +70,7 @@ for phase in phases:
             fit_params_copy = fit_params.copy()
             fit_params_copy.update({
                 'epochs': EPOCHS_PHASES[0],
-                'baseline': 1,
+                'baseline': 2,
                 'single_annotator': annotator,
             })
             training_loop(dataset, BATCH_SIZES, learning_rates, local_folder, EPOCHS_PHASES[0],
