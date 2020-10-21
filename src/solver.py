@@ -227,7 +227,7 @@ class Solver(object):
             # Transformer approach
             if baseline==2:
                 self._print(f'Model: Longformer. Annotator {annotator} - Epoch {epoch}: Step {i} / {len_data_loader}' + 10 * ' ', end='\r')
-                inputs_ids = data.input_ids.to(self.device)
+                input_ids = data.input_ids.to(self.device)
                 attention_mask = data.attention_mask.to(self.device)
                 labels = data.labels.to(self.device)
                 
