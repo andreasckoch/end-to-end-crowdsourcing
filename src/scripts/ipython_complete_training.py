@@ -27,6 +27,7 @@ AVERAGING_METHOD = 'micro'
 LR_INT = [1e-6, 1e-3]
 BATCH_SIZES = [32]
 DEVICE = torch.device('cuda')
+MODEL = LONGFORMER
 
 # # #  Setup  # # #
 dataset = EmotionDataset(device=DEVICE)
@@ -69,7 +70,7 @@ for phase in phases:
             fit_params_copy = fit_params.copy()
             fit_params_copy.update({
                 'epochs': EPOCHS_PHASES[0],
-                'basic_only': True,
+                'baseline': 1,
                 'single_annotator': annotator,
             })
             training_loop(dataset, BATCH_SIZES, learning_rates, local_folder, EPOCHS_PHASES[0],
@@ -84,7 +85,7 @@ for phase in phases:
         fit_params_copy = fit_params.copy()
         fit_params_copy.update({
             'epochs': EPOCHS_PHASES[1],
-            'basic_only': True,
+            'baseline': 1,
         })
         training_loop(dataset, BATCH_SIZES, learning_rates, local_folder, EPOCHS_PHASES[1],
                       solver_params_copy, fit_params_copy, phase_path=phase)

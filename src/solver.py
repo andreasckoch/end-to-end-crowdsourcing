@@ -4,11 +4,12 @@ import torch.nn as nn
 import torch.optim as optim
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 
+from transformers import LongformerModel, LongformerTokenizerFast
 from datasets.tripadvisor import TripAdvisorDataset
 from datasets import collate_wrapper
 from models.ipa2lt_head import Ipa2ltHead
 from models.basic import BasicNetwork
-from utils import get_model_path
+from utils import get_model_path, adapt_dataset_for_trafo
 
 
 class Solver(object):
@@ -35,6 +36,7 @@ class Solver(object):
         self.verbose = verbose
         self.averaging_method = averaging_method
         self.use_softmax = use_softmax
+        self.tokenizer = LongformerTokenizerFast.from_pretrained('allenai/longformer-base-4096')
 
         # List with pseudo annotators and separate function for getting a model path
         self.pseudo_annotators = pseudo_annotators
@@ -44,15 +46,28 @@ class Solver(object):
         if pseudo_annotators is not None:
             self._create_pseudo_labels()
 
-    def _get_model(self, basic_only=False, pretrained_basic=False):
-        if not basic_only:
+    def _get_model(self, pretrained_basic=False, baseline=0):
+        # baseline: [0] = basic + IPA, [1] = basic_only, [2] = longformer
+        if baseline == 0:
             model = Ipa2ltHead(self.embedding_dim, self.label_dim, self.annotator_dim, use_softmax=self.use_softmax)
-        else:
+            if self.verbose:
+                print('Model: IPA2LT with Basic Network')
+        elif baseline == 1:
             model = BasicNetwork(self.embedding_dim, self.label_dim, use_softmax=self.use_softmax)
+            if self.verbose:
+                print('Model: Basic Network')
+        elif baseline == 2:
+            model = LongformerModel.from_pretrained('allenai/longformer-base-4096', return_dict=True)            
+            if self.verbose:
+                print('Model: Longformer')
+        else:
+            print('WARNING: The chosen value for baseline is not valid. _get_model will return default: IPA2LT + Basic')
+            model = Ipa2ltHead(self.embedding_dim, self.label_dim, self.annotator_dim, use_softmax=self.use_softmax)
+
         if self.model_weights_path is not '':
             print(
                 f'Training model with weights of file {self.model_weights_path}')
-            if pretrained_basic and not basic_only:
+            if pretrained_basic and baseline!=1:
                 model.basic_network.load_state_dict(torch.load(self.model_weights_path))
             else:
                 model.load_state_dict(torch.load(self.model_weights_path))
@@ -74,9 +89,9 @@ class Solver(object):
 
         print(*args, **kwargs)
 
-    def fit(self, epochs, return_f1=False, single_annotator=None, basic_only=False, fix_base=False, pretrained_basic=False):
-        model = self._get_model(basic_only=basic_only, pretrained_basic=pretrained_basic)
-        if single_annotator is not None or basic_only:
+    def fit(self, epochs, return_f1=False, single_annotator=None, fix_base=False, pretrained_basic=False, baseline=0):
+        model = self._get_model(pretrained_basic=pretrained_basic, baseline=baseline)
+        if single_annotator is not None or baseline==1 or baseline==2:
             self.annotator_dim = 1
             optimizer = optim.AdamW([
                 {'params': model.parameters()},
@@ -86,7 +101,7 @@ class Solver(object):
         #    criterion = nn.BCELoss()
         # elif self.label_dim > 2:
         criterion = nn.CrossEntropyLoss()
-        if single_annotator is None and not basic_only:
+        if single_annotator is None and baseline!=1:
             if not fix_base:
                 optimizers = [optim.AdamW([
                     {'params': model.basic_network.parameters()},
@@ -117,7 +132,7 @@ class Solver(object):
                     annotator = single_annotator
                     self.dataset.set_annotator_filter(annotator)
                     no_annotator_head = True
-                elif single_annotator is None and basic_only:
+                elif single_annotator is None and (baseline==1 or baseline==2):
                     annotator = 'all'
                     self.dataset.no_annotator_filter()
                     no_annotator_head = True
@@ -127,27 +142,49 @@ class Solver(object):
                     self.dataset.set_annotator_filter(annotator)
                     no_annotator_head = False
 
+                
+                ## CHECK IF COLLATE_WRAPPER GIVES PROBLEMS. SHOULD I READJUST IT?
+                
                 # training
                 self.dataset.set_mode('train')
-                train_loader = torch.utils.data.DataLoader(
-                    self.dataset, batch_size=self.batch_size, collate_fn=collate_wrapper)
-                self.fit_epoch(model, optimizer, criterion, train_loader, annotator, i,
-                               epoch, loss_history, no_annotator_head=no_annotator_head)
+                if baseline==2: # if longformer
+                    model.to(self.device)
+                    model.train()
+                    transformer_specific_dataset = adapt_dataset_for_trafo(self.dataset, self.tokenizer)
+                    train_loader = torch.utils.data.DataLoader(
+                        transformer_specific_dataset, batch_size=self.batch_size, collate_fn=collate_wrapper)
+                else:
+                    train_loader = torch.utils.data.DataLoader(
+                        self.dataset, batch_size=self.batch_size, collate_fn=collate_wrapper)
+                    
+                self.fit_epoch(model, optimizer, criterion, train_loader, annotator, i, epoch,
+                               loss_history, no_annotator_head=no_annotator_head, baseline=baseline)
 
                 # validation
                 self.dataset.set_mode('validation')
-                val_loader = torch.utils.data.DataLoader(
-                    self.dataset, batch_size=self.batch_size, collate_fn=collate_wrapper)
+                if baseline==2: # if longformer
+                    transformer_specific_dataset = adapt_dataset_for_trafo(self.dataset, self.tokenizer)
+                    val_loader = torch.utils.data.DataLoader(transformer_specific_dataset, batch_size=self.batch_size,
+                                                             collate_fn=collate_wrapper)
+                else:
+                    val_loader = torch.utils.data.DataLoader(
+                        self.dataset, batch_size=self.batch_size, collate_fn=collate_wrapper)
+                    
                 if return_f1:
                     if len(val_loader) is 0:
                         self.dataset.set_mode('train')
-                        val_loader = torch.utils.data.DataLoader(
-                            self.dataset, batch_size=self.batch_size, collate_fn=collate_wrapper)
-                    _, _, f1 = self.fit_epoch(model, optimizer, criterion, val_loader, annotator, i,
-                                              epoch, loss_history, mode='validation', return_metrics=True, no_annotator_head=no_annotator_head)
+                        if baseline==2:
+                            transformer_specific_dataset = adapt_dataset_for_trafo(self.dataset, self.tokenizer)
+                            val_loader = torch.utils.data.DataLoader(transformer_specific_dataset, batch_size=self.batch_size,
+                                                                     collate_fn=collate_wrapper)
+                        else:
+                            val_loader = torch.utils.data.DataLoader(
+                                self.dataset, batch_size=self.batch_size, collate_fn=collate_wrapper)
+                    _, _, f1 = self.fit_epoch(model, optimizer, criterion, val_loader, annotator, i, epoch, loss_history,
+                                              mode='validation', return_metrics=True, no_annotator_head=no_annotator_head, baseline=baseline)
                 else:
-                    self.fit_epoch(model, optimizer, criterion, val_loader, annotator, i,
-                                   epoch, loss_history, mode='validation', no_annotator_head=no_annotator_head)
+                    self.fit_epoch(model, optimizer, criterion, val_loader, annotator, i, epoch, loss_history,
+                                   mode='validation', no_annotator_head=no_annotator_head, baseline=baseline)
 
             if self.save_at is not None and self.save_path_head is not None and self.save_params is not None:
                 if epoch in self.save_at:
@@ -171,7 +208,7 @@ class Solver(object):
         return model
 
     def fit_epoch(self, model, opt, criterion, data_loader, annotator, annotator_idx, epoch, loss_history, mode='train',
-                  return_metrics=False, no_annotator_head=False):
+                  return_metrics=False, no_annotator_head=False, baseline=0):
         if no_annotator_head:
             annotator_idx = None
         mean_loss = 0.0
@@ -180,26 +217,44 @@ class Solver(object):
         mean_recall = 0.0
         mean_f1 = 0.0
         len_data_loader = len(data_loader)
+        print('len_data_loader: ', len_data_loader)
         for i, data in enumerate(data_loader, 1):
             # Prepare inputs to be passed to the model
             # Prepare labels for the Loss computation
-            self._print(
-                f'Annotator {annotator} - Epoch {epoch}: Step {i} / {len_data_loader}' + 10 * ' ', end='\r')
-            inputs, labels, pseudo_labels = data.input, data.target, data.pseudo_targets
+            
             opt.zero_grad()
+                       
+            if baseline==2:    # TRANSFORMER APPROACH
+                self._print(f'Model: Longformer. Annotator {annotator} - Epoch {epoch}: Step {i} / {len_data_loader}' + 10 * ' ', end='\r')
+                inputs_ids = batch['input_ids'].to(self.device)
+                attention_mask = batch['attention_mask'].to(self.device)
+                labels = batch['labels'].to(self.device)
+                
+                # Generate predictions
+                
+                ### TODO: extend to include annotator_idx!
+                outputs = model(input_ids, attention_mask=attention_mask, labels=labels)
+                
+                # Compute Loss:
+                loss = outputs[0]
+                
+            else:              # BASIC APPROACH
+                self._print(f'Annotator {annotator} - Epoch {epoch}: Step {i} / {len_data_loader}' + 10 * ' ', end='\r')
+                inputs, labels, pseudo_labels = data.input, data.target, data.pseudo_targets
 
-            # Generate predictions
-            if annotator_idx is not None:
-                outputs = model(inputs)[annotator_idx]
-                if len(pseudo_labels) is not 0:
-                    outputs_pseudo_labels = model(inputs)
-                    losses = [criterion(outputs_pseudo_labels[self.dataset.annotators.index(ann)].float(), pseudo_labels[ann])
-                              for ann in pseudo_labels.keys()]
-            else:
-                outputs = model(inputs)
 
-            # Compute Loss:
-            loss = criterion(outputs.float(), labels)
+                # Generate predictions
+                if annotator_idx is not None:
+                    outputs = model(inputs)[annotator_idx]
+                    if len(pseudo_labels) is not 0:
+                        outputs_pseudo_labels = model(inputs)
+                        losses = [criterion(outputs_pseudo_labels[self.dataset.annotators.index(ann)].float(),
+                                            pseudo_labels[ann]) for ann in pseudo_labels.keys()]
+                else:
+                    outputs = model(inputs)
+
+                # Compute Loss:
+                loss = criterion(outputs.float(), labels)
 
             # performance measures of the batch
             predictions = outputs.argmax(dim=1)

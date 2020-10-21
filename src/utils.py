@@ -2,6 +2,24 @@ import os
 import numpy as np
 from scipy.special import exp10
 from torch.utils.tensorboard import SummaryWriter
+from datasets.huggingface import CustomDataset
+
+# Constants: (models)
+BASE = 0
+LONGFORMER = 1
+
+
+def adapt_dataset_for_trafo(dataset, tokenizer):
+    texts = []
+    labels = []
+    annotators = []
+    for datapoint in dataset:
+        annotators.append(datapoint['annotator'])
+        texts.append(datapoint['text'])
+        labels.append(datapoint['label'].item())
+    encoded_texts = tokenizer(texts)
+    transformer_specific_dataset = CustomDataset(encoded_texts, labels, annotators)
+    return transformer_specific_dataset
 
 
 def get_writer(path, stem, current_time, params):
