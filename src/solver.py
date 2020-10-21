@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch.optim as optim
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 
-from transformers import LongformerModel, LongformerTokenizerFast
+from transformers import LongformerForSequenceClassification, LongformerTokenizerFast
 from datasets.tripadvisor import TripAdvisorDataset
 from datasets import collate_wrapper, collate_wrapper_transformers
 from models.ipa2lt_head import Ipa2ltHead
@@ -18,7 +18,7 @@ class Solver(object):
                  embedding_dim=50, label_dim=2, annotator_dim=2, averaging_method='macro',
                  save_path_head=None, save_at=None, save_params=None, use_softmax=False,
                  pseudo_annotators=None, pseudo_model_path_func=None, pseudo_func_args={},
-                 ):
+                 accumulation_steps=8):
         self.learning_rate = learning_rate
         self.batch_size = batch_size
         self.dataset = dataset
@@ -35,6 +35,7 @@ class Solver(object):
         self.verbose = verbose
         self.averaging_method = averaging_method
         self.use_softmax = use_softmax
+        self.accumulation_steps = accumulation_steps
         self.tokenizer = LongformerTokenizerFast.from_pretrained('allenai/longformer-base-4096')
 
         # List with pseudo annotators and separate function for getting a model path
@@ -56,7 +57,7 @@ class Solver(object):
             if self.verbose:
                 print('Model: Basic Network')
         elif baseline == 2:
-            model = LongformerModel.from_pretrained('allenai/longformer-base-4096', return_dict=True)            
+            model = LongformerForSequenceClassification.from_pretrained('allenai/longformer-base-4096', return_dict=True)            
             if self.verbose:
                 print('Model: Longformer')
         else:
@@ -218,28 +219,65 @@ class Solver(object):
         mean_recall = 0.0
         mean_f1 = 0.0
         len_data_loader = len(data_loader)
+        
+        # Reset gradients tensors
+        model.zero_grad()
+        
         for i, data in enumerate(data_loader, 1):
             # Prepare inputs to be passed to the model
             # Prepare labels for the Loss computation
-            
-            opt.zero_grad()
-            
-            # Transformer approach
+                        
             if baseline==2:
+                ################# TRANSFORMER APPROACH #################
+                
                 self._print(f'Model: Longformer. Annotator {annotator} - Epoch {epoch}: Step {i} / {len_data_loader}' + 10 * ' ', end='\r')
                 input_ids = data.input_ids.to(self.device)
                 attention_mask = data.attention_mask.to(self.device)
                 labels = data.labels.to(self.device)
                 
-                # Generate predictions
-                
-                ### TODO: extend to include annotator_idx!
+                # Generate predictions (TODO: extend to include annotator_idx!)
                 outputs = model(input_ids, attention_mask=attention_mask, labels=labels)
                 
                 # Compute Loss:
                 loss = outputs[0]
                 
+                # performance measures of the batch
+                predictions = outputs.argmax(dim=1)
+                accuracy, precision, recall, f1 = self.performance_measures(predictions, labels, self.averaging_method)
+
+                # statistics for logging
+                current_batch_size = inputs.shape[0]
+                divisor = (i - 1) * self.batch_size + current_batch_size
+                mean_loss = ((i - 1) * self.batch_size * mean_loss +
+                             loss.item() * current_batch_size) / divisor
+                mean_accuracy = (mean_accuracy * self.batch_size * (i - 1) + accuracy.item() * current_batch_size) / divisor
+                mean_precision = (mean_precision * self.batch_size * (i - 1) + precision.item() * current_batch_size) / divisor
+                mean_recall = (mean_recall * self.batch_size * (i - 1) + recall.item() * current_batch_size) / divisor
+                mean_f1 = (mean_f1 * self.batch_size * (i - 1) + f1.item() * current_batch_size) / divisor
+                loss_history.append(loss.item())
+
+                if mode is 'train':
+                    # Update gradients
+                    if annotator_idx is not None and len(pseudo_labels) is not 0:
+                        final_loss = loss
+                        for pseudo_loss in losses:
+                            final_loss += pseudo_loss
+                        final_loss.backward()
+                    else:
+                        loss.backward()
+                        
+                # https://medium.com/huggingface/training-larger-batches-practical-tips-on-
+                # 1-gpu-multi-gpu-distributed-setups-ec88c3e51255
+                
+                # Gradient accumulation to stop cuda memory errors. (URL above)
+                if (i+1) % self.accumulation_steps == 0:             # Wait for several backward steps
+                    optimizer.step()                            # Now we can do an optimizer step
+                    model.zero_grad()                           # Reset gradients tensors
+                
             else:
+                ################# BASIC APPROACH #################
+                
+                opt.zero_grad()
                 self._print(f'Annotator {annotator} - Epoch {epoch}: Step {i} / {len_data_loader}' + 10 * ' ', end='\r')
                 inputs, labels, pseudo_labels = data.input, data.target, data.pseudo_targets
 
@@ -257,30 +295,30 @@ class Solver(object):
                 # Compute Loss:
                 loss = criterion(outputs.float(), labels)
 
-            # performance measures of the batch
-            predictions = outputs.argmax(dim=1)
-            accuracy, precision, recall, f1 = self.performance_measures(predictions, labels, self.averaging_method)
+                # performance measures of the batch
+                predictions = outputs.argmax(dim=1)
+                accuracy, precision, recall, f1 = self.performance_measures(predictions, labels, self.averaging_method)
 
-            # statistics for logging
-            current_batch_size = inputs.shape[0]
-            divisor = (i - 1) * self.batch_size + current_batch_size
-            mean_loss = ((i - 1) * self.batch_size * mean_loss +
-                         loss.item() * current_batch_size) / divisor
-            mean_accuracy = (mean_accuracy * self.batch_size * (i - 1) + accuracy.item() * current_batch_size) / divisor
-            mean_precision = (mean_precision * self.batch_size * (i - 1) + precision.item() * current_batch_size) / divisor
-            mean_recall = (mean_recall * self.batch_size * (i - 1) + recall.item() * current_batch_size) / divisor
-            mean_f1 = (mean_f1 * self.batch_size * (i - 1) + f1.item() * current_batch_size) / divisor
-            loss_history.append(loss.item())
+                # statistics for logging
+                current_batch_size = inputs.shape[0]
+                divisor = (i - 1) * self.batch_size + current_batch_size
+                mean_loss = ((i - 1) * self.batch_size * mean_loss +
+                             loss.item() * current_batch_size) / divisor
+                mean_accuracy = (mean_accuracy * self.batch_size * (i - 1) + accuracy.item() * current_batch_size) / divisor
+                mean_precision = (mean_precision * self.batch_size * (i - 1) + precision.item() * current_batch_size) / divisor
+                mean_recall = (mean_recall * self.batch_size * (i - 1) + recall.item() * current_batch_size) / divisor
+                mean_f1 = (mean_f1 * self.batch_size * (i - 1) + f1.item() * current_batch_size) / divisor
+                loss_history.append(loss.item())
 
-            if mode is 'train':
-                # Update gradients
-                if annotator_idx is not None and len(pseudo_labels) is not 0:
-                    final_loss = loss
-                    for pseudo_loss in losses:
-                        final_loss += pseudo_loss
-                    final_loss.backward()
-                else:
-                    loss.backward()
+                if mode is 'train':
+                    # Update gradients
+                    if annotator_idx is not None and len(pseudo_labels) is not 0:
+                        final_loss = loss
+                        for pseudo_loss in losses:
+                            final_loss += pseudo_loss
+                        final_loss.backward()
+                    else:
+                        loss.backward()
 
                 # Optimization step
                 opt.step()

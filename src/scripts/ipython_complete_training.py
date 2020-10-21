@@ -25,7 +25,7 @@ ANNOTATOR_DIM = 38
 USE_SOFTMAX = True
 AVERAGING_METHOD = 'micro'
 LR_INT = [1e-6, 1e-3]
-BATCH_SIZES = [32]
+BATCH_SIZES = [4]
 DEVICE = torch.device('cuda')
 MODEL = LONGFORMER
 
