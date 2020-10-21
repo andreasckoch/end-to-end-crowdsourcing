@@ -148,8 +148,9 @@ class SimpleCustomBatch_transformers:
     """
 
     def __init__(self, data, device):
-        self.input = torch.stack([sample['input_ids'] for sample in data]).to(device=device)
-        self.target = torch.stack([sample['labels'] for sample in data]).to(device=device)
+        self.input_ids = torch.stack([sample['input_ids'] for sample in data]).to(device=device)
+        self.attention_mask = torch.stack([sample['attention_mask'] for sample in data]).to(device=device)
+        self.labels = torch.stack([sample['labels'] for sample in data]).to(device=device)
 
 
         if 'pseudo_labels' in data[0].keys():
@@ -159,8 +160,9 @@ class SimpleCustomBatch_transformers:
             self.pseudo_targets = {}
 
     def pin_memory(self):
-        self.input = self.input.pin_memory()
-        self.target = self.target.pin_memory()
+        self.input_ids = self.input_ids.pin_memory()
+        self.attention_mask = self.attention_mask.pin_memory()
+        self.labels = self.labels.pin_memory()
         return self
 
 
