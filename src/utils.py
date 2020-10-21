@@ -17,7 +17,7 @@ def adapt_dataset_for_trafo(dataset, tokenizer):
         annotators.append(datapoint['annotator'])
         texts.append(datapoint['text'])
         labels.append(datapoint['label'].item())
-    encoded_texts = tokenizer(texts)
+    encoded_texts = tokenizer(texts, truncation=True, padding=True)
     transformer_specific_dataset = CustomDataset(encoded_texts, labels, annotators)
     return transformer_specific_dataset
 

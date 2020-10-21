@@ -151,6 +151,7 @@ class SimpleCustomBatch_transformers:
         self.input = torch.stack([sample['input_ids'] for sample in data]).to(device=device)
         self.target = torch.stack([sample['labels'] for sample in data]).to(device=device)
 
+
         if 'pseudo_labels' in data[0].keys():
             self.pseudo_targets = {ann: torch.stack([sample['pseudo_labels'][ann] for sample in data]).to(device=device)
                                    for ann in data[0]['pseudo_labels'].keys()}
