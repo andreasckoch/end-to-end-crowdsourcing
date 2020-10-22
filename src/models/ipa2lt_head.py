@@ -6,12 +6,12 @@ import torch
 
 
 class Ipa2ltHead(nn.Module):
-    def __init__(self, embedding_dim, label_dim, annotator_dim):
+    def __init__(self, embedding_dim, label_dim, annotator_dim, use_softmax=False):
         super().__init__()
 
         self.annotator_dim = annotator_dim
         self.label_dim = label_dim
-        self.basic_network = BasicNetwork(embedding_dim, label_dim)
+        self.basic_network = BasicNetwork(embedding_dim, label_dim, use_softmax=use_softmax)
         self.bias_matrices = nn.ModuleList([nn.Linear(label_dim, label_dim, bias=False) for i in range(annotator_dim)])
 
         self.basic_network.apply(initialize_weight)

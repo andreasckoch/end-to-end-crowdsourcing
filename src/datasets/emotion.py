@@ -28,9 +28,20 @@ def emotion_file_processor(path, emotion):
     return data
 
 
-def encode_scores(score, maximum_value=100, num_of_classes=3):
+def encode_scores(score, maximum_value=100, starting_value=-100, num_of_classes=3, separate_zero_class_idx=1):
+    """
+    Ranges for all emotions: [0, 100]
+    Exception is 'valence' with: [-100, 100]
+    """
     step = maximum_value * 2 / num_of_classes
-    ranges = [{'start': - maximum_value + i * step, 'end': -maximum_value + (i + 1) * step} for i in range(num_of_classes)]
+    ranges = [{'start': starting_value + i * step, 'end': starting_value + (i + 1) * step} for i in range(num_of_classes)]
+    if separate_zero_class_idx is not None:
+        ranges[separate_zero_class_idx] = {'start': 0, 'end': 0}
+        ranges[separate_zero_class_idx - 1] = {'start': ranges[separate_zero_class_idx - 1]['start'], 'end': 0}
+        ranges[separate_zero_class_idx + 1] = {'start': 0, 'end': ranges[separate_zero_class_idx + 1]['end']}
+        if score is 0:
+            return separate_zero_class_idx
+
     for idx, ran in enumerate(ranges):
         if score >= ran['start'] and score <= ran['end']:
             return idx
@@ -56,20 +67,20 @@ class EmotionDataset(BaseDataset):
         emotions = reduce(lambda left, right: pd.merge(
             left, right, on=['!amt_annotation_ids', 'annotator', 'orig_id']), data)
 
-        self.annotators = ['A1AVJRFM6L0RN8', 'ADAGUJNWMEPT6', 'A1LY3NJTYW9TFF', 'A14WWG6NKBDWGP', 'A1VYRD3HO2WDUN',
-                           'A1XUURRBT9RYFW', 'A1M0SEWUJYX9K0', 'A2KBTYNGUFRB9N', 'A3POYFULMTNW1H', 'ARQ4J4TLTPBNC']
-
         self.data = pd.merge(emotions, affect, how='left', left_on='orig_id', right_on='id')
-        
+
         self.annotators = self.data.annotator.unique().tolist()
         self.data = self.data.to_dict('records')
 
         self.data_shuffle()
 
+        self.pseudo_labels_key = f'{self.emotion}_pseudo_labels'
+
     def set_emotion(self, emotion):
         if emotion not in self.emotions:
             raise Exception(f"Emotion must be one of these: \n{','.join(self.emotions)}")
         self.emotion = emotion
+        self.pseudo_labels_key = f'{self.emotion}_pseudo_labels'
 
     def __getitem__(self, idx):
         if self.annotator_filter is not '':
@@ -81,9 +92,11 @@ class EmotionDataset(BaseDataset):
         out = datapoint.copy()
         out['embedding'] = torch.tensor(datapoint['embedding'], device=self.device, dtype=torch.float32)
         out['label'] = torch.tensor(int(datapoint[f'{self.emotion}_label']), device=self.device, dtype=torch.long)
-        
-        if self.pseudo_labels:
-            for pseudo_ann in datapoint['pseudo_labels'].keys():
-                out['pseudo_labels'][pseudo_ann] = torch.tensor(int(datapoint['pseudo_labels'][pseudo_ann]), device=self.device, dtype=torch.long)
+
+        if datapoint[self.pseudo_labels_key] is None:
+            out[self.pseudo_labels_key] = {}
+        out['pseudo_labels'] = {}
+        for pseudo_ann in out[self.pseudo_labels_key].keys():
+            out['pseudo_labels'][pseudo_ann] = torch.tensor(int(datapoint[self.pseudo_labels_key][pseudo_ann]), device=self.device, dtype=torch.long)
 
         return out
