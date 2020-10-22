@@ -235,12 +235,61 @@ class Solver(object):
                 attention_mask = data.attention_mask.to(self.device)
                 labels = data.labels.to(self.device)
                 
+                """
+                inputs = []
+                if input_ids.max() != 0:
+                    normalize_factor = 1/input_ids.max().item()
+                    for i in range(len(input_ids)):
+                        row = []
+                        for j in range(len(input_ids[0])):
+                            row.append(input_ids[i][j].item() * normalize_factor)
+                        inputs.append(row)
+                print(f'inputs: {inputs}')
+                input_ids = torch.FloatTensor(inputs).to(self.device)
+                attention_mask = attention_mask.float()
+                labels = labels.float()
+                print(f'input_ids (float to device): {input_ids}')
+                
+                
+                input_ids = input_ids.long()
+                print(f'input_ids (long): {input_ids}')
+                input_ids = torch.LongTensor(inputs).to(self.device)
+                print(f'input_ids: {input_ids}')
+                """
+                
+                
                 # Generate predictions (TODO: extend to include annotator_idx!)
                 outputs = model(input_ids, attention_mask=attention_mask, labels=labels)
                 
                 # Compute Loss:
                 loss = outputs[0]
                 
+                """
+                
+                # print(f'loss: {loss}')              # This line gives Cuda error
+                # print(f'loss.item():{loss.item()}') # This line gives Cuda error
+                
+                print(f'type(loss): {type(loss)}')
+                print(f'loss.item(): {loss.item()}')
+                print(f'np.shape(loss): {np.shape(loss)}')
+
+                print(f'type(loss.item()): {type(loss.item())}')
+                # loss_history.append(loss.item())
+
+                # statistics for logging
+                current_batch_size = input_ids.shape[0]
+                divisor = (i - 1) * self.batch_size + current_batch_size
+                
+                print(f'current_batch_size: {current_batch_size}')
+                print(f'divisor:{divisor}')
+                
+                loss_history.append(loss.item())
+
+                
+                
+                mean_loss = ((i - 1) * self.batch_size * mean_loss + loss.item() * current_batch_size) / divisor
+                
+                 # THESE MUST FIRST BE ADAPTED TO THE MODEL OUTPUTS!!!
                 # performance measures of the batch
                 predictions = outputs.argmax(dim=1)
                 accuracy, precision, recall, f1 = self.performance_measures(predictions, labels, self.averaging_method)
@@ -254,7 +303,7 @@ class Solver(object):
                 mean_precision = (mean_precision * self.batch_size * (i - 1) + precision.item() * current_batch_size) / divisor
                 mean_recall = (mean_recall * self.batch_size * (i - 1) + recall.item() * current_batch_size) / divisor
                 mean_f1 = (mean_f1 * self.batch_size * (i - 1) + f1.item() * current_batch_size) / divisor
-                loss_history.append(loss.item())
+                """
 
                 if mode is 'train':
                     # Update gradients
@@ -273,6 +322,9 @@ class Solver(object):
                 if (i+1) % self.accumulation_steps == 0:             # Wait for several backward steps
                     optimizer.step()                            # Now we can do an optimizer step
                     model.zero_grad()                           # Reset gradients tensors
+                    
+                if self.writer is not None:
+                    self.writer.add_scalar(f'Loss/Annotator {annotator}/{mode}', mean_loss, epoch)
                 
             else:
                 ################# BASIC APPROACH #################
@@ -280,7 +332,6 @@ class Solver(object):
                 opt.zero_grad()
                 self._print(f'Annotator {annotator} - Epoch {epoch}: Step {i} / {len_data_loader}' + 10 * ' ', end='\r')
                 inputs, labels, pseudo_labels = data.input, data.target, data.pseudo_targets
-
 
                 # Generate predictions
                 if annotator_idx is not None:
@@ -323,17 +374,20 @@ class Solver(object):
                 # Optimization step
                 opt.step()
 
-            if self.writer is not None:
-                self.writer.add_scalar(f'Loss/Annotator {annotator}/{mode}', mean_loss, epoch)
-                self.writer.add_scalar(
-                    f'Accuracy/Annotator {annotator}/{mode}', mean_accuracy, epoch)
-                self.writer.add_scalar(
-                    f'Precision/Annotator {annotator}/{mode}', mean_precision, epoch)
-                self.writer.add_scalar(f'Recall/Annotator {annotator}/{mode}', mean_recall, epoch)
-                self.writer.add_scalar(f'F1 score/Annotator {annotator}/{mode}', mean_f1, epoch)
+                if self.writer is not None:
+                    self.writer.add_scalar(f'Loss/Annotator {annotator}/{mode}', mean_loss, epoch)
+                    self.writer.add_scalar(
+                        f'Accuracy/Annotator {annotator}/{mode}', mean_accuracy, epoch)
+                    self.writer.add_scalar(
+                        f'Precision/Annotator {annotator}/{mode}', mean_precision, epoch)
+                    self.writer.add_scalar(f'Recall/Annotator {annotator}/{mode}', mean_recall, epoch)
+                    self.writer.add_scalar(f'F1 score/Annotator {annotator}/{mode}', mean_f1, epoch)
 
         if return_metrics:
-            return mean_loss, mean_accuracy, mean_f1
+            if baseline==2:
+                return mean_loss
+            else:
+                return mean_loss, mean_accuracy, mean_f1
 
     def evaluate_model(self, output_file_path, labels=None):
         model = self._get_model()
