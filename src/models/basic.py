@@ -35,12 +35,10 @@ class BasicNetwork(nn.Module):
         x = self.classifier(x)
 
         # apply softmax or sigmoid
-        if self.use_softmax:
-            if shape_len is 3:
-                x = self.softmax_batch(x)
-            elif shape_len is 2:
-                x = self.softmax(x)
-        else:
-            x = self.sigmoid(x)
+        
+        if shape_len is 3:
+            x = self.softmax_batch(x)
+        elif shape_len is 2:
+            x = self.softmax(x)
 
         return x
