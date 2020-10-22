@@ -99,8 +99,11 @@ ssh -N -f -L localhost:YYYY:localhost:XXXX mripoll@social4.cm.in.tum.de
 
 - Open the browser and go to:
 ```
+# Ask for password.
+
 http://localhost:YYYY
 ```
+The password for the jupyter notebook must only be entered once from each local computer.
 
 The jupyter notebook will open in your browser on the homepage of the social4 computer. You can use the new button --> terminal to open a jupyter terminal connected to social4 or work directly from a local computer terminal after using the "ssh mripoll@social4.cm.in.tum.de" command.
 
@@ -111,6 +114,3 @@ ipython
 
 >>> %load ipython_script.py
 ```
-
-From this point you 
-
