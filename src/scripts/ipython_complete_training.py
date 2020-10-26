@@ -15,22 +15,22 @@ from utils import *
 EPOCHS_PHASES = [300, 500, 300]
 NUM_DRAWS_PHASES = [8, 20, 10]
 SAVE_MODEL_AT_PHASES = [[], [10, 100, 300], [10, 100, 200]]
-LOCAL_FOLDER = 'train_10_20/complete_training_test'
+LOCAL_FOLDER = 'train_10_24/complete_training'
 # MODEL_WEIGHTS_PATH = '../models/train_10_17/tripadvisor/pretraining_softmax/' + \
 #     '0.88136_batch64_lr0.00031867445707134466_20201019-092128_epoch300.pt'
 
 STEM = ''
-LABEL_DIM = 3
-ANNOTATOR_DIM = 38
+LABEL_DIM = 2
+ANNOTATOR_DIM = 2
 USE_SOFTMAX = True
-AVERAGING_METHOD = 'micro'
+AVERAGING_METHOD = 'macro'
 LR_INT = [1e-6, 1e-3]
-BATCH_SIZES = [32]
+BATCH_SIZES = [64]
 DEVICE = torch.device('cuda')
 
 # # #  Setup  # # #
-dataset = EmotionDataset(device=DEVICE)
-# dataset = TripAdvisorDataset(device=DEVICE)
+# dataset = EmotionDataset(device=DEVICE)
+dataset = TripAdvisorDataset(device=DEVICE)
 solver_params = {
     'device': DEVICE,
     'label_dim': LABEL_DIM,
@@ -41,14 +41,15 @@ solver_params = {
 fit_params = {
     'return_f1': True,
 }
-emotion = 'valence'
-dataset.set_emotion(emotion)
-local_folder = f'{LOCAL_FOLDER}/{emotion}'
+# emotion = 'valence'
+# dataset.set_emotion(emotion)
+local_folder = f'{LOCAL_FOLDER}/tripadvisor'  # {emotion}'
 pseudo_root_path = f'../models/{local_folder}'
 pseudo_func_args = {
     'pseudo_root': pseudo_root_path,
     'phase': 'individual_training',
 }
+pseudo_model_path_func = get_pseudo_model_path
 
 # # #  Training  # # #
 # Emotions Loop (comment out as needed)
@@ -96,7 +97,7 @@ for phase in phases:
             'save_at': SAVE_MODEL_AT_PHASES[2],
             'model_weights_path': get_best_model_path(f'{pseudo_root_path}/{phases[1]}'),  # get best model from pretraining
             'pseudo_annotators': dataset.annotators,
-            'pseudo_model_path_func': get_pseudo_model_path_emotion,
+            'pseudo_model_path_func': pseudo_model_path_func,
             'pseudo_func_args': pseudo_func_args,
         })
         fit_params_copy = fit_params.copy()

@@ -134,6 +134,7 @@ dmypy.json
 data/tripadvisor/**/*.txt
 data/emotion/*
 data/equity/*
+data/wikipedia/**/*.tsv
 data/embeddings/word2vec/*.txt
 models/*
 logs/*

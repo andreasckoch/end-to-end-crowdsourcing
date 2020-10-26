@@ -6,7 +6,7 @@ import torch
 
 
 class Ipa2ltHead(nn.Module):
-    def __init__(self, embedding_dim, label_dim, annotator_dim, use_softmax=False):
+    def __init__(self, embedding_dim, label_dim, annotator_dim, use_softmax=True):
         super().__init__()
 
         self.annotator_dim = annotator_dim

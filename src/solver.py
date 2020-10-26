@@ -5,7 +5,6 @@ import torch.optim as optim
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 
 from datasets.tripadvisor import TripAdvisorDataset
-from datasets import collate_wrapper
 from models.ipa2lt_head import Ipa2ltHead
 from models.basic import BasicNetwork
 from utils import get_model_path
@@ -16,7 +15,7 @@ class Solver(object):
     def __init__(self, dataset, learning_rate, batch_size, momentum=0.9, model_weights_path='',
                  writer=None, device=torch.device('cpu'), verbose=True,
                  embedding_dim=50, label_dim=2, annotator_dim=2, averaging_method='macro',
-                 save_path_head=None, save_at=None, save_params=None, use_softmax=False,
+                 save_path_head=None, save_at=None, save_params=None, use_softmax=True,
                  pseudo_annotators=None, pseudo_model_path_func=None, pseudo_func_args={},
                  ):
         self.learning_rate = learning_rate
@@ -44,14 +43,21 @@ class Solver(object):
         if pseudo_annotators is not None:
             self._create_pseudo_labels()
 
+        if self.device.type == 'cpu':
+            from datasets import collate_wrapper_cpu as collate_wrapper
+        elif self.device.type == 'cuda':
+            from datasets import collate_wrapper
+        self.collate_wrapper = collate_wrapper
+
     def _get_model(self, basic_only=False, pretrained_basic=False):
         if not basic_only:
             model = Ipa2ltHead(self.embedding_dim, self.label_dim, self.annotator_dim, use_softmax=self.use_softmax)
         else:
             model = BasicNetwork(self.embedding_dim, self.label_dim, use_softmax=self.use_softmax)
         if self.model_weights_path is not '':
-            print(
-                f'Training model with weights of file {self.model_weights_path}')
+            if self.verbose:
+                print(
+                    f'Training model with weights of file {self.model_weights_path}')
             if pretrained_basic and not basic_only:
                 model.basic_network.load_state_dict(torch.load(self.model_weights_path))
             else:
@@ -107,8 +113,9 @@ class Solver(object):
         f1 = 0.0
 
         # self._print('START TRAINING')
-        self._print(
-            f'learning rate: {self.learning_rate} - batch size: {self.batch_size}')
+        if self.verbose:
+            self._print(
+                f'learning rate: {self.learning_rate} - batch size: {self.batch_size}')
         for epoch in range(epochs):
             # loop over all annotators
             for i in range(self.annotator_dim):
@@ -130,19 +137,19 @@ class Solver(object):
                 # training
                 self.dataset.set_mode('train')
                 train_loader = torch.utils.data.DataLoader(
-                    self.dataset, batch_size=self.batch_size, collate_fn=collate_wrapper)
+                    self.dataset, batch_size=self.batch_size, collate_fn=self.collate_wrapper)
                 self.fit_epoch(model, optimizer, criterion, train_loader, annotator, i,
                                epoch, loss_history, no_annotator_head=no_annotator_head)
 
                 # validation
                 self.dataset.set_mode('validation')
                 val_loader = torch.utils.data.DataLoader(
-                    self.dataset, batch_size=self.batch_size, collate_fn=collate_wrapper)
+                    self.dataset, batch_size=self.batch_size, collate_fn=self.collate_wrapper)
                 if return_f1:
                     if len(val_loader) is 0:
                         self.dataset.set_mode('train')
                         val_loader = torch.utils.data.DataLoader(
-                            self.dataset, batch_size=self.batch_size, collate_fn=collate_wrapper)
+                            self.dataset, batch_size=self.batch_size, collate_fn=self.collate_wrapper)
                     _, _, f1 = self.fit_epoch(model, optimizer, criterion, val_loader, annotator, i,
                                               epoch, loss_history, mode='validation', return_metrics=True, no_annotator_head=no_annotator_head)
                 else:
@@ -161,9 +168,10 @@ class Solver(object):
                     print(f'Saving model at: {path}')
                     torch.save(model.state_dict(), path)
 
-        self._print('Finished Training' + 20 * ' ')
-        self._print('sum of first 10 losses: ', sum(loss_history[0:10]))
-        self._print('sum of last  10 losses: ', sum(loss_history[-10:]))
+        if self.verbose:
+            self._print('Finished Training' + 20 * ' ')
+            self._print('sum of first 10 losses: ', sum(loss_history[0:10]))
+            self._print('sum of last  10 losses: ', sum(loss_history[-10:]))
 
         if return_f1:
             return model, f1
@@ -241,7 +249,7 @@ class Solver(object):
         if return_metrics:
             return mean_loss, mean_accuracy, mean_f1
 
-    def evaluate_model(self, output_file_path, labels=None):
+    def evaluate_model(self, output_file_path, labels=None, mode='train'):
         model = self._get_model()
 
         # write annotation bias matrices into log file
@@ -249,7 +257,7 @@ class Solver(object):
         original_stdout = sys.stdout
         with open(output_file_path, 'w') as f:
             sys.stdout = f
-            self.dataset.set_mode('train')
+            self.dataset.set_mode(mode)
             out_text = ''
             acc_out = ''
             bias_out = 'Annotation bias matrices\n\n'
@@ -277,7 +285,7 @@ class Solver(object):
                 self.dataset.set_annotator_filter(annotator)
                 # batch_size needs to be 1
                 val_loader = torch.utils.data.DataLoader(
-                    self.dataset, batch_size=1, collate_fn=collate_wrapper)
+                    self.dataset, batch_size=1, collate_fn=self.collate_wrapper)
 
                 for i, data in enumerate(val_loader, 1):
                     # Prepare inputs to be passed to the model
