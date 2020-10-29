@@ -139,3 +139,4 @@ data/embeddings/word2vec/*.txt
 models/*
 logs/*
 visuals/*
+results/

@@ -6,7 +6,7 @@ import pandas as pd
 import torch
 
 
-def file_processor(comments_path, annotations_path, demographics_path, task, group_by_gender, text_processor):
+def file_processor(comments_path, annotations_path, demographics_path, task, group_by_gender, percentage, text_processor):
     comments = pd.read_csv(comments_path, sep='\t')[['rev_id', 'comment', 'split']]
     annotations = pd.read_csv(annotations_path, sep='\t')[['rev_id', 'worker_id', f'{task}']]
     demographics = pd.read_csv(demographics_path, sep='\t')[['worker_id', 'gender']]
@@ -29,7 +29,22 @@ def file_processor(comments_path, annotations_path, demographics_path, task, gro
     })
 
     # rename data splits
-    data[data['split'] == 'dev'] = 'validation'
+    data.loc[data['split'] == 'dev', 'split'] = 'validation'
+
+    # only use a part of this dataset
+    data_parts = []
+    for split in ['train', 'validation', 'test']:
+        for annotator in data.annotator.unique().tolist():
+            split_idx = int(data.loc[(data['split'] == split) & (data['annotator'] == annotator), :].shape[0] * percentage)
+            data_parts.append(data.loc[(data['split'] == split) & (data['annotator'] == annotator), :]
+                              .iloc[:split_idx, :])
+    data = pd.concat(data_parts, ignore_index=True)
+    # also filter comments
+    rev_ids = data.rev_id.unique().tolist()
+    comments_parts = []
+    for rev in rev_ids:
+        comments_parts.append(comments.loc[comments['rev_id'] == rev, :])
+    comments = pd.concat(comments_parts, ignore_index=True)
 
     # embed comments only to save memory
     comments['embedding'] = None
@@ -59,6 +74,7 @@ class WikipediaDataset(BaseDataset):
 
         self.task = args.get('task', 'aggression')
         self.group_by_gender = args.get('group_by_gender', False)
+        self.percentage = args.get('percentage', 0.2)
 
         self.tasks = ['aggression', 'attack', 'toxicity']
         if self.task not in self.tasks:
@@ -71,7 +87,7 @@ class WikipediaDataset(BaseDataset):
         demographics_path = f'{root}/{self.task}_worker_demographics.tsv'
 
         self.data, self.comments = file_processor(comments_path, annotations_path, demographics_path,
-                                                  self.task, self.group_by_gender, self.text_processor)
+                                                  self.task, self.group_by_gender, self.percentage, self.text_processor)
 
         self.annotators = self.data.annotator.unique().tolist()
         self.data = self.data.to_dict('records')
@@ -99,3 +115,18 @@ class WikipediaDataset(BaseDataset):
             out['pseudo_labels'][pseudo_ann] = torch.tensor(int(datapoint['pseudo_labels'][pseudo_ann]), device=self.device, dtype=torch.long)
 
         return out
+
+    def create_pseudo_labels(self, annotator, pseudo_annotator, model):
+        # label each data point labeled by annotator with pseudo labels by pseduo_annotator / the model
+        for mode in self.data.keys():
+            for point in self.data[mode]:
+                if point[self.pseudo_labels_key] is None:
+                    point[self.pseudo_labels_key] = {}
+                if point['annotator'] is annotator and pseudo_annotator not in point[self.pseudo_labels_key].keys():
+                    embedding = self.comments[self.comments['rev_id'] == point['rev_id']]['embedding'].iloc[0]
+                    inp = torch.tensor(embedding, device=self.device, dtype=torch.float32)
+                    pseudo_label = model(inp).argmax().cpu().numpy().item()
+                    point[self.pseudo_labels_key][pseudo_annotator] = pseudo_label
+
+        if self.annotator_filter is not '':
+            self.data_mask = [x['annotator'] == self.annotator_filter for x in self.data[self.mode]]

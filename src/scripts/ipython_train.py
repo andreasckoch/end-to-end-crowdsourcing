@@ -14,30 +14,30 @@ from utils import *
 # Config
 EPOCHS = 1000
 SAVE_MODEL_AT = [10, 100, 300, 500]
-LOCAL_FOLDER = 'train_10_20/no_pseudo_labeling/valence/full_training'
-MODEL_WEIGHTS_PATH = '../models/train_10_20/no_pseudo_labeling/valence/pretraining/' + \
-    '0.62222_batch32_lr0.0009900373459039093_20201020-163838_epoch1000.pt'
-PSEUDO_ROOT_PATH = '../models/train_09_24'
+LOCAL_FOLDER = 'train_10_24/complete_training/tripadvisor/no_pseudo_labeling/'
+MODEL_WEIGHTS_PATH = '../models/train_10_24/complete_training/tripadvisor/pretraining/' + \
+    '0.88112_batch64_lr0.0002903813998274658_20201024-201719_epoch500.pt'
+# PSEUDO_ROOT_PATH = '../models/train_09_24'
 
 STEM = ''
-LABEL_DIM = 3
-ANNOTATOR_DIM = 38
+LABEL_DIM = 2
+ANNOTATOR_DIM = 2
 USE_SOFTMAX = True
-AVERAGING_METHOD = 'micro'
+AVERAGING_METHOD = 'macro'
 LR_INT = [1e-6, 1e-3]
 NUM_DRAWS = 20
-BATCH_SIZES = [32]
+BATCH_SIZES = [64]
 DEVICE = torch.device('cuda')
 
 # Setup
 learning_rates = exp10(-np.random.uniform(-np.log10(LR_INT[0]), -np.log10(LR_INT[1]), size=NUM_DRAWS))
-dataset = EmotionDataset(device=DEVICE)
-# dataset = TripAdvisorDataset(device=DEVICE)
+# dataset = EmotionDataset(device=DEVICE)
+dataset = TripAdvisorDataset(device=DEVICE)
 
 # Emotions Loop (comment out as needed)
 # for emotion in dataset.emotions:
-emotion = 'valence'
-dataset.set_emotion(emotion)
+# emotion = 'valence'
+# dataset.set_emotion(emotion)
 
 # # Annotator Loop (comment out as needed)
 # for annotator in dataset.annotators:

@@ -110,13 +110,15 @@ class Solver(object):
         loss_history = []
         inputs = 0
         labels = 0
-        f1 = 0.0
 
         # self._print('START TRAINING')
         if self.verbose:
             self._print(
                 f'learning rate: {self.learning_rate} - batch size: {self.batch_size}')
         for epoch in range(epochs):
+            f1 = 0.0
+            samples_looked_at = 0.0
+
             # loop over all annotators
             for i in range(self.annotator_dim):
                 # switch to current annotator
@@ -150,8 +152,13 @@ class Solver(object):
                         self.dataset.set_mode('train')
                         val_loader = torch.utils.data.DataLoader(
                             self.dataset, batch_size=self.batch_size, collate_fn=self.collate_wrapper)
-                    _, _, f1 = self.fit_epoch(model, optimizer, criterion, val_loader, annotator, i,
-                                              epoch, loss_history, mode='validation', return_metrics=True, no_annotator_head=no_annotator_head)
+                    _, _, f1_ann = self.fit_epoch(model, optimizer, criterion, val_loader, annotator, i,
+                                                  epoch, loss_history, mode='validation', return_metrics=True, no_annotator_head=no_annotator_head)
+                    # essentially micro averaging across annotators
+                    f1 = (samples_looked_at * f1 + f1_ann * len(self.dataset)) / (samples_looked_at + len(self.dataset))
+                    samples_looked_at += len(self.dataset)
+                    # print(f'DEBUG SOLVER - i: {i}, f1: {f1}, f1_ann: {f1_ann}, samples_looked_at: {samples_looked_at},
+                    # len dataset: {len(self.dataset)}')
                 else:
                     self.fit_epoch(model, optimizer, criterion, val_loader, annotator, i,
                                    epoch, loss_history, mode='validation', no_annotator_head=no_annotator_head)
@@ -249,8 +256,14 @@ class Solver(object):
         if return_metrics:
             return mean_loss, mean_accuracy, mean_f1
 
-    def evaluate_model(self, output_file_path, labels=None, mode='train'):
+    def evaluate_model(self, output_file_path, labels=None, mode='train', pretrained_basic_path=''):
         model = self._get_model()
+
+        # load pretrained model for comparison
+        if pretrained_basic_path != '':
+            pretrained_model = BasicNetwork(self.embedding_dim, self.label_dim, use_softmax=self.use_softmax)
+            pretrained_model.load_state_dict(torch.load(pretrained_basic_path))
+            pretrained_model.to(self.device)
 
         # write annotation bias matrices into log file
         import sys
@@ -261,6 +274,10 @@ class Solver(object):
             out_text = ''
             acc_out = ''
             bias_out = 'Annotation bias matrices\n\n'
+            overall_correct = 0
+            overall_len = 0
+            if pretrained_basic_path != '':
+                pretrained_correct = 0
             for i, annotator in enumerate(self.dataset.annotators):
                 bias_out += f'Annotator {annotator}\n'
                 bias_out += f'Output\\LatentTruth'
@@ -294,6 +311,8 @@ class Solver(object):
                     # Generate predictions
                     latent_truth = model.basic_network(inp)
                     output = model(inp)
+                    if pretrained_basic_path != '':
+                        pretrained_output = pretrained_model(inp)
 
                     # print input/output
                     out_text += f'Point {i} - Label by {annotator}: {label.cpu().numpy()} - Latent truth {latent_truth.cpu().detach().numpy()}'
@@ -302,18 +321,29 @@ class Solver(object):
                         out_text += f' - Annotator {ann} {output[idx].cpu().detach().numpy()}'
                         predictions[ann] = [output[idx].argmax(dim=1), output[idx].max(dim=1)]
 
-                    # filtered_preds = {key: predictions[key][1] for key in predictions.keys() if predictions[key][0] == label}
-
+                    # compare the prediction with the label for each annotator
                     for idx, ann in enumerate(self.dataset.annotators):
                         if predictions[ann][0] == label:
                             # annotator_highest_pred = max(filtered_preds, key=filtered_preds.get)
                             correct[ann] += 1
+
+                    # compare the prediction with the label for the annotator that created the label
+                    if predictions[annotator][0] == label:
+                        overall_correct += 1
+
+                    # compare the prediction with the label for the pretrained model
+                    if pretrained_basic_path != '':
+                        if pretrained_output.argmax(dim=1) == label:
+                            pretrained_correct += 1
+
                     predictions_set = set([predictions[ann][0].cpu().detach().numpy().item(0) for ann in self.dataset.annotators])
                     if len(predictions_set) is not 1:
                         different_answers += 1
                         different_answers_idx.append(i)
 
                     out_text += '\n'
+
+                overall_len += len(self.dataset)
 
                 # Document correct predictions
                 all_same_accuracies = set([correct[ann] for ann in self.dataset.annotators])
@@ -331,6 +361,18 @@ class Solver(object):
                     acc_out += f'Annotator {ann}: {correct[ann]} / {len(self.dataset)}     '
                 acc_out += '\n\n'
 
+            # Document overall accuracy
+            overall_acc_out = 'Overall accuracies\n\n'
+            overall_accuracy = overall_correct / overall_len
+            overall_acc_out += f'Accuracy with bias matrices: {overall_correct} / {overall_len} or as percentage: {overall_accuracy:.5f}\n'
+            if pretrained_basic_path != '':
+                pretrained_accuracy = pretrained_correct / overall_len
+                overall_acc_out += f'Accuracy with pretrained model: {pretrained_correct} / {overall_len} ' + \
+                    f'or as percentage: {pretrained_accuracy:.5f}\n\n'
+            else:
+                overall_acc_out += '\n\n'
+
+            print(overall_acc_out)
             print(bias_out)
             print(acc_out)
             print('\n' * 30)
