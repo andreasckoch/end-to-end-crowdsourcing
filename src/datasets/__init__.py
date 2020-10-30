@@ -142,16 +142,15 @@ class SimpleCustomBatch:
         return self
 
     
-class SimpleCustomBatch_transformers:
+class SimpleCustomBatchTrafo:
     """
-    Same as SimpleCustomBatch but applied to dataloaders with transformer specific dataset inputs.
+    Same as SimpleCustomBatch but for transformer models
     """
 
     def __init__(self, data, device):
         self.input_ids = torch.stack([sample['input_ids'] for sample in data]).to(device=device)
         self.attention_mask = torch.stack([sample['attention_mask'] for sample in data]).to(device=device)
         self.labels = torch.stack([sample['labels'] for sample in data]).to(device=device)
-
 
         if 'pseudo_labels' in data[0].keys():
             self.pseudo_targets = {ann: torch.stack([sample['pseudo_labels'][ann] for sample in data]).to(device=device)
@@ -160,18 +159,22 @@ class SimpleCustomBatch_transformers:
             self.pseudo_targets = {}
 
     def pin_memory(self):
-        self.input_ids = self.input_ids.pin_memory()
-        self.attention_mask = self.attention_mask.pin_memory()
-        self.labels = self.labels.pin_memory()
+        self.input = self.input.pin_memory()
+        self.target = self.target.pin_memory()
         return self
-
+    
 
 def collate_wrapper(batch, device=torch.device('cuda')):
     return SimpleCustomBatch(batch, device)
 
 
-def collate_wrapper_transformers(batch, device=torch.device('cuda')):
-    """
-    Same as collate_wrapper but applied to dataloaders with transformer specific dataset inputs.
-    """
-    return SimpleCustomBatch_transformers(batch, device)
+def collate_wrapper_cpu(batch, device=torch.device('cpu')):
+    return SimpleCustomBatch(batch, device)
+
+
+def collate_wrapper_trafo(batch, device=torch.device('cuda')):
+    return SimpleCustomBatchTrafo(batch, device)
+
+
+def collate_wrapper_cpu_trafo(batch, device=torch.device('cpu')):
+    return SimpleCustomBatchTrafo(batch, device)

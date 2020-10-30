@@ -5,8 +5,8 @@ from torch.utils.tensorboard import SummaryWriter
 from datasets.huggingface import CustomDataset
 
 # Constants: (models)
-BASE = 0
-LONGFORMER = 1
+BASE = 1
+LONGFORMER = 2
 
 
 def adapt_dataset_for_trafo(dataset, tokenizer):

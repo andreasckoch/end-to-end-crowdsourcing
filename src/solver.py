@@ -6,7 +6,7 @@ from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_sc
 
 from transformers import LongformerForSequenceClassification, LongformerTokenizerFast
 from datasets.tripadvisor import TripAdvisorDataset
-from datasets import collate_wrapper, collate_wrapper_transformers
+from datasets import collate_wrapper
 from models.ipa2lt_head import Ipa2ltHead
 from models.basic import BasicNetwork
 from utils import get_model_path, adapt_dataset_for_trafo
@@ -37,6 +37,7 @@ class Solver(object):
         self.use_softmax = use_softmax
         self.accumulation_steps = accumulation_steps
         self.tokenizer = LongformerTokenizerFast.from_pretrained('allenai/longformer-base-4096')
+        self.modifiable_dataset = dataset
 
         # List with pseudo annotators and separate function for getting a model path
         self.pseudo_annotators = pseudo_annotators
@@ -45,6 +46,18 @@ class Solver(object):
 
         if pseudo_annotators is not None:
             self._create_pseudo_labels()
+            
+        if self.device.type == 'cpu':
+            from datasets import collate_wrapper_cpu as collate_wrapper
+        elif self.device.type == 'cuda':
+            from datasets import collate_wrapper
+        self.collate_wrapper = collate_wrapper
+
+        if self.device.type == 'cpu':
+            from datasets import collate_wrapper_cpu_trafo as collate_wrapper_trafo
+        elif self.device.type == 'cuda':
+            from datasets import collate_wrapper_trafo
+        self.collate_wrapper_trafo = collate_wrapper_trafo
 
     def _get_model(self, pretrained_basic=False, baseline=0):
         # baseline: [0] = basic + IPA, [1] = basic_only, [2] = longformer
@@ -57,7 +70,7 @@ class Solver(object):
             if self.verbose:
                 print('Model: Basic Network')
         elif baseline == 2:
-            model = LongformerForSequenceClassification.from_pretrained('allenai/longformer-base-4096', return_dict=True)            
+            model = LongformerForSequenceClassification.from_pretrained('allenai/longformer-base-4096', num_labels=3, return_dict=True)
             if self.verbose:
                 print('Model: Longformer')
         else:
@@ -122,9 +135,13 @@ class Solver(object):
         f1 = 0.0
 
         # self._print('START TRAINING')
-        self._print(
-            f'learning rate: {self.learning_rate} - batch size: {self.batch_size}')
+        if self.verbose:
+            self._print(
+                f'learning rate: {self.learning_rate} - batch size: {self.batch_size}')
         for epoch in range(epochs):
+            f1 = 0.0
+            samples_looked_at = 0.0
+            
             # loop over all annotators
             for i in range(self.annotator_dim):
                 # switch to current annotator
@@ -142,52 +159,51 @@ class Solver(object):
                     self.dataset.set_annotator_filter(annotator)
                     no_annotator_head = False
 
-                ## COLLATE IS GIVING PROBLEMS:
-                ## TODO: Fix collate_wrapper_transformers and SimpleCustomBatch_transformers in datasets
                 
                 # training
-                self.dataset.set_mode('train')
+                self.modifiable_dataset = self.dataset
+                self.modifiable_dataset.set_mode('train')
                 if baseline==2: # if longformer
                     model.to(self.device)
                     model.train()
-                    transformer_specific_dataset = adapt_dataset_for_trafo(self.dataset, self.tokenizer)
-                    train_loader = torch.utils.data.DataLoader(transformer_specific_dataset, batch_size=self.batch_size,
-                                                               collate_fn=collate_wrapper_transformers)
-                    
-                else: # if basic and/or ipa
-                    train_loader = torch.utils.data.DataLoader(
-                        self.dataset, batch_size=self.batch_size, collate_fn=collate_wrapper)
+                    self.modifiable_dataset = adapt_dataset_for_trafo(self.modifiable_dataset, self.tokenizer)
+                    train_loader = torch.utils.data.DataLoader(self.modifiable_dataset, batch_size=self.batch_size,
+                                                               collate_fn=self.collate_wrapper_trafo)
+                else:
+                    train_loader = torch.utils.data.DataLoader(self.modifiable_dataset, batch_size=self.batch_size,
+                                                               collate_fn=self.collate_wrapper)
                     
                 self.fit_epoch(model, optimizer, criterion, train_loader, annotator, i, epoch,
                                loss_history, no_annotator_head=no_annotator_head, baseline=baseline)
 
                 # validation
-                self.dataset.set_mode('validation')
+                self.modifiable_dataset = self.dataset
+                self.modifiable_dataset.set_mode('validation')
                 if baseline==2: # if longformer
-                    transformer_specific_dataset = adapt_dataset_for_trafo(self.dataset, self.tokenizer)
-                    val_loader = torch.utils.data.DataLoader(transformer_specific_dataset, batch_size=self.batch_size,
-                                                             collate_fn=collate_wrapper_transformers)
-                        
-                else: # if basic and/or ipa
-                    val_loader = torch.utils.data.DataLoader(
-                        self.dataset, batch_size=self.batch_size, collate_fn=collate_wrapper)
+                    # model.eval()
+                    self.modifiable_dataset = adapt_dataset_for_trafo(self.modifiable_dataset, self.tokenizer)
+                    val_loader = torch.utils.data.DataLoader(self.modifiable_dataset, batch_size=self.batch_size,
+                                                             collate_fn=self.collate_wrapper_trafo)
+                else:
+                    val_loader = torch.utils.data.DataLoader(self.modifiable_dataset, batch_size=self.batch_size,
+                                                         collate_fn=self.collate_wrapper)
                     
                 if return_f1:
                     if len(val_loader) is 0:
                         self.dataset.set_mode('train')
-                        if baseline==2:
-                            transformer_specific_dataset = adapt_dataset_for_trafo(self.dataset, self.tokenizer)
-                            val_loader = torch.utils.data.DataLoader(transformer_specific_dataset, batch_size=self.batch_size,
-                                                                     collate_fn=collate_wrapper_transformers)
-                            
+                        if baseline == 2:
+                            val_loader = torch.utils.data.DataLoader(self.modifiable_dataset, batch_size=self.batch_size,
+                                                                 collate_fn=self.collate_wrapper_trafo)
                         else:
-                            val_loader = torch.utils.data.DataLoader(
-                                self.dataset, batch_size=self.batch_size, collate_fn=collate_wrapper)
-                    _, _, f1 = self.fit_epoch(model, optimizer, criterion, val_loader, annotator, i, epoch, loss_history,
-                                              mode='validation', return_metrics=True, no_annotator_head=no_annotator_head, baseline=baseline)
+                            val_loader = torch.utils.data.DataLoader(self.modifiable_dataset, batch_size=self.batch_size,
+                                                                 collate_fn=self.collate_wrapper)
+                    _, _, f1 = self.fit_epoch(model, optimizer, criterion, val_loader, annotator, i,
+                                              epoch, loss_history, mode='validation', return_metrics=True,
+                                              no_annotator_head=no_annotator_head, baseline=baseline)
                 else:
                     self.fit_epoch(model, optimizer, criterion, val_loader, annotator, i, epoch, loss_history,
                                    mode='validation', no_annotator_head=no_annotator_head, baseline=baseline)
+                    
             if self.save_at is not None and self.save_path_head is not None and self.save_params is not None:
                 if epoch in self.save_at:
                     params = self.save_params
@@ -211,6 +227,7 @@ class Solver(object):
 
     def fit_epoch(self, model, opt, criterion, data_loader, annotator, annotator_idx, epoch, loss_history, mode='train',
                   return_metrics=False, no_annotator_head=False, baseline=0):
+        
         if no_annotator_head:
             annotator_idx = None
         mean_loss = 0.0
@@ -220,6 +237,7 @@ class Solver(object):
         mean_f1 = 0.0
         len_data_loader = len(data_loader)
         
+
         # Reset gradients tensors
         model.zero_grad()
         
@@ -235,67 +253,21 @@ class Solver(object):
                 attention_mask = data.attention_mask.to(self.device)
                 labels = data.labels.to(self.device)
                 
-                """
-                inputs = []
-                if input_ids.max() != 0:
-                    normalize_factor = 1/input_ids.max().item()
-                    for i in range(len(input_ids)):
-                        row = []
-                        for j in range(len(input_ids[0])):
-                            row.append(input_ids[i][j].item() * normalize_factor)
-                        inputs.append(row)
-                print(f'inputs: {inputs}')
-                input_ids = torch.FloatTensor(inputs).to(self.device)
-                attention_mask = attention_mask.float()
-                labels = labels.float()
-                print(f'input_ids (float to device): {input_ids}')
-                
-                
-                input_ids = input_ids.long()
-                print(f'input_ids (long): {input_ids}')
-                input_ids = torch.LongTensor(inputs).to(self.device)
-                print(f'input_ids: {input_ids}')
-                """
-                
+                print(f'input_ids: {input_ids}\n\nattention_mask: {attention_mask}\n\nlabels: {labels}')
                 
                 # Generate predictions (TODO: extend to include annotator_idx!)
                 outputs = model(input_ids, attention_mask=attention_mask, labels=labels)
                 
                 # Compute Loss:
-                loss = outputs[0]
+                loss = outputs[0]                
+                # performance measures of the batch
+                predictions = outputs[1].argmax(dim=1)
+                accuracy, precision, recall, f1 = self.performance_measures(predictions, labels, self.averaging_method)
                 
-                """
+                print(f'predictions: {predictions}\naccuracy: {accuracy}\nprecision: {precision}\nrecall: {recall}\nf1: {f1}')
                 
-                # print(f'loss: {loss}')              # This line gives Cuda error
-                # print(f'loss.item():{loss.item()}') # This line gives Cuda error
-                
-                print(f'type(loss): {type(loss)}')
-                print(f'loss.item(): {loss.item()}')
-                print(f'np.shape(loss): {np.shape(loss)}')
-
-                print(f'type(loss.item()): {type(loss.item())}')
-                # loss_history.append(loss.item())
-
                 # statistics for logging
                 current_batch_size = input_ids.shape[0]
-                divisor = (i - 1) * self.batch_size + current_batch_size
-                
-                print(f'current_batch_size: {current_batch_size}')
-                print(f'divisor:{divisor}')
-                
-                loss_history.append(loss.item())
-
-                
-                
-                mean_loss = ((i - 1) * self.batch_size * mean_loss + loss.item() * current_batch_size) / divisor
-                
-                 # THESE MUST FIRST BE ADAPTED TO THE MODEL OUTPUTS!!!
-                # performance measures of the batch
-                predictions = outputs.argmax(dim=1)
-                accuracy, precision, recall, f1 = self.performance_measures(predictions, labels, self.averaging_method)
-
-                # statistics for logging
-                current_batch_size = inputs.shape[0]
                 divisor = (i - 1) * self.batch_size + current_batch_size
                 mean_loss = ((i - 1) * self.batch_size * mean_loss +
                              loss.item() * current_batch_size) / divisor
@@ -303,7 +275,7 @@ class Solver(object):
                 mean_precision = (mean_precision * self.batch_size * (i - 1) + precision.item() * current_batch_size) / divisor
                 mean_recall = (mean_recall * self.batch_size * (i - 1) + recall.item() * current_batch_size) / divisor
                 mean_f1 = (mean_f1 * self.batch_size * (i - 1) + f1.item() * current_batch_size) / divisor
-                """
+                loss_history.append(loss.item())
 
                 if mode is 'train':
                     # Update gradients
@@ -319,7 +291,7 @@ class Solver(object):
                 # 1-gpu-multi-gpu-distributed-setups-ec88c3e51255
                 
                 # Gradient accumulation to stop cuda memory errors. (URL above)
-                if (i+1) % self.accumulation_steps == 0:             # Wait for several backward steps
+                if (i+1) % self.accumulation_steps == 0:        # Wait for several backward steps
                     optimizer.step()                            # Now we can do an optimizer step
                     model.zero_grad()                           # Reset gradients tensors
                     
@@ -425,7 +397,7 @@ class Solver(object):
                 self.dataset.set_annotator_filter(annotator)
                 # batch_size needs to be 1
                 val_loader = torch.utils.data.DataLoader(
-                    self.dataset, batch_size=1, collate_fn=collate_wrapper)
+                    self.dataset, batch_size=1, collate_fn=self.collate_wrapper)
 
                 for i, data in enumerate(val_loader, 1):
                     # Prepare inputs to be passed to the model
