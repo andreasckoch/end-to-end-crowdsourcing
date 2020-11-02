@@ -6,7 +6,7 @@ import pandas as pd
 import torch
 
 
-def file_processor(comments_path, annotations_path, demographics_path, task, group_by_gender, percentage, text_processor):
+def file_processor(comments_path, annotations_path, demographics_path, task, group_by_gender, percentage, only_male_female, text_processor):
     comments = pd.read_csv(comments_path, sep='\t')[['rev_id', 'comment', 'split']]
     annotations = pd.read_csv(annotations_path, sep='\t')[['rev_id', 'worker_id', f'{task}']]
     demographics = pd.read_csv(demographics_path, sep='\t')[['worker_id', 'gender']]
@@ -17,6 +17,10 @@ def file_processor(comments_path, annotations_path, demographics_path, task, gro
 
     # filter out NaNs, which can be in gender column
     data = data[data['gender'].notnull()]
+
+    # filter for male and female gender only
+    if only_male_female:
+        data = data[data['gender'] != 'other']
 
     # rename columns
     annotator_column = 'worker_id'
@@ -75,6 +79,7 @@ class WikipediaDataset(BaseDataset):
         self.task = args.get('task', 'aggression')
         self.group_by_gender = args.get('group_by_gender', False)
         self.percentage = args.get('percentage', 0.2)
+        self.only_male_female = args.get('only_male_female', False)
 
         self.tasks = ['aggression', 'attack', 'toxicity']
         if self.task not in self.tasks:
@@ -87,7 +92,8 @@ class WikipediaDataset(BaseDataset):
         demographics_path = f'{root}/{self.task}_worker_demographics.tsv'
 
         self.data, self.comments = file_processor(comments_path, annotations_path, demographics_path,
-                                                  self.task, self.group_by_gender, self.percentage, self.text_processor)
+                                                  self.task, self.group_by_gender, self.percentage, self.only_male_female,
+                                                  self.text_processor)
 
         self.annotators = self.data.annotator.unique().tolist()
         self.data = self.data.to_dict('records')

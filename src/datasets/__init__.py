@@ -138,10 +138,12 @@ class SimpleCustomBatch:
         self.target = torch.stack([sample['label'] for sample in data]).to(device=device)
 
         if 'pseudo_labels' in data[0].keys():
-            self.pseudo_targets = {ann: torch.stack([sample['pseudo_labels'][ann] for sample in data]).to(device=device)
-                                   for ann in data[0]['pseudo_labels'].keys()}
+            self.pseudo_targets = [sample['pseudo_labels'] for sample in data]
         else:
-            self.pseudo_targets = {}
+            self.pseudo_targets = []
+
+        # record annotator information in list
+        self.annotations = ([sample['annotator'] for sample in data])
 
     def pin_memory(self):
         self.input = self.input.pin_memory()

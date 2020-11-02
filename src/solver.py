@@ -3,6 +3,7 @@ import numpy as np
 import torch.nn as nn
 import torch.optim as optim
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+from itertools import compress
 
 from datasets.tripadvisor import TripAdvisorDataset
 from models.ipa2lt_head import Ipa2ltHead
@@ -80,13 +81,13 @@ class Solver(object):
 
         print(*args, **kwargs)
 
-    def fit(self, epochs, return_f1=False, single_annotator=None, basic_only=False, fix_base=False, pretrained_basic=False):
+    def fit(self, epochs, return_f1=False, single_annotator=None, basic_only=False, fix_base=False, pretrained_basic=False, deep_randomization=False):
         model = self._get_model(basic_only=basic_only, pretrained_basic=pretrained_basic)
         if single_annotator is not None or basic_only:
             self.annotator_dim = 1
-            optimizer = optim.AdamW([
+            optimizers = [optim.AdamW([
                 {'params': model.parameters()},
-            ], lr=self.learning_rate, betas=(0.9, 0.999), eps=1e-08, weight_decay=0.01, amsgrad=False)
+            ], lr=self.learning_rate, betas=(0.9, 0.999), eps=1e-08, weight_decay=0.01, amsgrad=False)]
 
         # if self.label_dim is 2:
         #    criterion = nn.BCELoss()
@@ -119,49 +120,77 @@ class Solver(object):
             f1 = 0.0
             samples_looked_at = 0.0
 
-            # loop over all annotators
-            for i in range(self.annotator_dim):
-                # switch to current annotator
+            if deep_randomization:
                 if single_annotator is not None:
-                    annotator = single_annotator
-                    self.dataset.set_annotator_filter(annotator)
-                    no_annotator_head = True
-                elif single_annotator is None and basic_only:
-                    annotator = 'all'
-                    self.dataset.no_annotator_filter()
-                    no_annotator_head = True
+                    self.dataset.set_annotator_filter(single_annotator)
+                    annotators = [single_annotator]
                 else:
-                    annotator = self.dataset.annotators[i]
-                    optimizer = optimizers[i]
-                    self.dataset.set_annotator_filter(annotator)
-                    no_annotator_head = False
+                    self.dataset.no_annotator_filter()
+                    annotators = self.dataset.annotators
 
                 # training
                 self.dataset.set_mode('train')
                 train_loader = torch.utils.data.DataLoader(
-                    self.dataset, batch_size=self.batch_size, collate_fn=self.collate_wrapper)
-                self.fit_epoch(model, optimizer, criterion, train_loader, annotator, i,
-                               epoch, loss_history, no_annotator_head=no_annotator_head)
-
+                    self.dataset, batch_size=self.batch_size, collate_fn=self.collate_wrapper, shuffle=True)
+                self.fit_epoch_deep_randomization(model, optimizers, criterion, train_loader, epoch, loss_history,
+                                                  annotators=annotators, basic_only=basic_only)
                 # validation
                 self.dataset.set_mode('validation')
                 val_loader = torch.utils.data.DataLoader(
-                    self.dataset, batch_size=self.batch_size, collate_fn=self.collate_wrapper)
-                if return_f1:
-                    if len(val_loader) is 0:
-                        self.dataset.set_mode('train')
-                        val_loader = torch.utils.data.DataLoader(
-                            self.dataset, batch_size=self.batch_size, collate_fn=self.collate_wrapper)
-                    _, _, f1_ann = self.fit_epoch(model, optimizer, criterion, val_loader, annotator, i,
-                                                  epoch, loss_history, mode='validation', return_metrics=True, no_annotator_head=no_annotator_head)
-                    # essentially micro averaging across annotators
-                    f1 = (samples_looked_at * f1 + f1_ann * len(self.dataset)) / (samples_looked_at + len(self.dataset))
-                    samples_looked_at += len(self.dataset)
-                    # print(f'DEBUG SOLVER - i: {i}, f1: {f1}, f1_ann: {f1_ann}, samples_looked_at: {samples_looked_at},
-                    # len dataset: {len(self.dataset)}')
-                else:
-                    self.fit_epoch(model, optimizer, criterion, val_loader, annotator, i,
-                                   epoch, loss_history, mode='validation', no_annotator_head=no_annotator_head)
+                    self.dataset, batch_size=self.batch_size, collate_fn=self.collate_wrapper, shuffle=True)
+                _, _, f1 = self.fit_epoch_deep_randomization(model, optimizers, criterion, val_loader, epoch,
+                                                             loss_history, annotators=annotators,
+                                                             basic_only=basic_only, mode='validation', return_metrics=return_f1)
+                if f1 is not None and isinstance(f1, dict):
+                    f1 = sum(f1.values()) / len(f1.values())
+
+            else:
+                # loop over all annotators
+                for i in range(self.annotator_dim):
+                    # switch to current annotator
+                    if single_annotator is not None:
+                        annotator = single_annotator
+                        self.dataset.set_annotator_filter(annotator)
+                        no_annotator_head = True
+                        optimizer = optimizers[0]
+                    elif single_annotator is None and basic_only:
+                        annotator = 'all'
+                        self.dataset.no_annotator_filter()
+                        no_annotator_head = True
+                        optimizer = optimizers[0]
+                    else:
+                        annotator = self.dataset.annotators[i]
+                        optimizer = optimizers[i]
+                        self.dataset.set_annotator_filter(annotator)
+                        no_annotator_head = False
+
+                    # training
+                    self.dataset.set_mode('train')
+                    train_loader = torch.utils.data.DataLoader(
+                        self.dataset, batch_size=self.batch_size, collate_fn=self.collate_wrapper)
+                    self.fit_epoch(model, optimizer, criterion, train_loader, annotator, i,
+                                   epoch, loss_history, no_annotator_head=no_annotator_head)
+
+                    # validation
+                    self.dataset.set_mode('validation')
+                    val_loader = torch.utils.data.DataLoader(
+                        self.dataset, batch_size=self.batch_size, collate_fn=self.collate_wrapper)
+                    if return_f1:
+                        if len(val_loader) is 0:
+                            self.dataset.set_mode('train')
+                            val_loader = torch.utils.data.DataLoader(
+                                self.dataset, batch_size=self.batch_size, collate_fn=self.collate_wrapper)
+                        _, _, f1_ann = self.fit_epoch(model, optimizer, criterion, val_loader, annotator, i,
+                                                      epoch, loss_history, mode='validation', return_metrics=True,
+                                                      no_annotator_head=no_annotator_head)
+                        # essentially micro averaging across annotators
+                        f1 = (samples_looked_at * f1 + f1_ann * len(self.dataset)) / (samples_looked_at + len(self.dataset))
+                        samples_looked_at += len(self.dataset)
+                        # print(f'DEBUG SOLVER - i: {i}, f1: {f1}, f1_ann: {f1_ann}, samples_looked_at: {samples_looked_at},
+                        # len dataset: {len(self.dataset)}')
+                    else:
+                        self.fit_epoch(model, optimizer, criterion, val_loader, annotator, i,
+                                       epoch, loss_history, mode='validation', no_annotator_head=no_annotator_head)
 
             if self.save_at is not None and self.save_path_head is not None and self.save_params is not None:
                 if epoch in self.save_at:
@@ -208,8 +237,14 @@ class Solver(object):
                 outputs = model(inputs)[annotator_idx]
                 if len(pseudo_labels) is not 0:
                     outputs_pseudo_labels = model(inputs)
-                    losses = [criterion(outputs_pseudo_labels[self.dataset.annotators.index(ann)].float(), pseudo_labels[ann])
-                              for ann in pseudo_labels.keys()]
+                    if isinstance(pseudo_labels, list):
+                        pseudo_annotators = set([ann for sample in pseudo_labels for ann in list(sample.keys())])
+                        losses = [criterion(outputs_pseudo_labels[self.dataset.annotators.index(ann)].float(),
+                                            torch.tensor([sample[ann] for sample in pseudo_labels]).to(device=self.device))
+                                  for ann in pseudo_annotators]
+                    else:
+                        losses = [criterion(outputs_pseudo_labels[self.dataset.annotators.index(ann)].float(), pseudo_labels[ann])
+                                  for ann in pseudo_labels.keys()]
             else:
                 outputs = model(inputs)
 
@@ -252,6 +287,175 @@ class Solver(object):
                     f'Precision/Annotator {annotator}/{mode}', mean_precision, epoch)
                 self.writer.add_scalar(f'Recall/Annotator {annotator}/{mode}', mean_recall, epoch)
                 self.writer.add_scalar(f'F1 score/Annotator {annotator}/{mode}', mean_f1, epoch)
+
+        if return_metrics:
+            return mean_loss, mean_accuracy, mean_f1
+
+    def fit_epoch_deep_randomization(self, model, optimizers, criterion, data_loader, epoch, loss_history, annotators=[], mode='train',
+                                     return_metrics=False, basic_only=False):
+        """
+            this function is made to take a dataset with no annotation filter
+            and thus having batches with samples by different annotators. It also
+            works with annotation filters. (normal fit_epoch function is more efficient
+            though for this purpose)
+        """
+        # Setup
+        if basic_only:
+            single_annotator = None
+            if len(annotators) is 1:
+                single_annotator = annotators[0]
+            annotators = []
+            mean_loss = 0.0
+            mean_accuracy = 0.0
+            mean_precision = 0.0
+            mean_recall = 0.0
+            mean_f1 = 0.0
+            if len(optimizers) != 1:
+                print('ERROR - please only provide one optimizer when training a basic model only!')
+                return
+        else:
+            if len(annotators) == 0:
+                print('ERROR - Please provide annotators in correct order!')
+                return
+
+            if len(annotators) != len(optimizers):
+                print('ERROR - Please provide as many optimizers as there are annotators!')
+                return
+            mean_loss = {ann: 0.0 for ann in annotators}
+            mean_accuracy = {ann: 0.0 for ann in annotators}
+            mean_precision = {ann: 0.0 for ann in annotators}
+            mean_recall = {ann: 0.0 for ann in annotators}
+            mean_f1 = {ann: 0.0 for ann in annotators}
+
+        # Training loop
+        len_data_loader = len(data_loader)
+        for i, data in enumerate(data_loader, 1):
+            inputs, labels, pseudo_labels, annotations = data.input, data.target, data.pseudo_targets, data.annotations
+            for opt in optimizers:
+                opt.zero_grad()
+
+            # Generate predictions
+            losses = {}
+            if len(pseudo_labels) is not 0:
+                pseudo_annotators = set([ann for sample in pseudo_labels for ann in list(sample.keys())])
+
+            for annotator_idx, annotator in enumerate(annotators):
+                self._print(
+                    f'Annotator {annotator} - Epoch {epoch}: Step {i} / {len_data_loader}' + 10 * ' ', end='\r')
+                outputs = model(inputs)
+                outputs_annotator = outputs[annotator_idx]
+                loss_annotations = None
+                if annotator in set(annotations):
+                    mask_labels = torch.tensor([ann == annotator for ann in annotations]).to(device=self.device)
+                    mask_outputs = torch.tensor([[ann == annotator, ann == annotator] for ann in annotations]).to(device=self.device)
+                    labels_annotations = torch.masked_select(labels, mask_labels)
+                    outputs_dim = (mask_labels[mask_labels].shape[0], outputs_annotator.shape[1])
+                    outputs_annotations = torch.masked_select(outputs_annotator, mask_outputs).reshape(outputs_dim)
+                    loss_annotations = criterion(outputs_annotations.float(), labels_annotations)
+
+                # search for this annotator in pseudo labels of samples by all other annotators to add the losses
+                loss_pseudo_annotations = None
+                if len(pseudo_labels) is not 0:
+                    if annotator in pseudo_annotators:
+                        mask_labels = [annotator in list(sample.keys()) for sample in pseudo_labels]
+                        labels_pseudo_annotations = torch.tensor([int(sample[annotator])
+                                                                  for sample in compress(pseudo_labels, mask_labels)]).to(device=self.device)
+                        mask_outputs = torch.tensor([[annotator in list(sample.keys()), annotator in list(sample.keys())]
+                                                     for sample in pseudo_labels]).to(device=self.device)
+                        outputs_dim = (len([x for x in compress(mask_labels, mask_labels)]), outputs_annotator.shape[1])
+                        outputs_pseudo_annotations = torch.masked_select(outputs_annotator, mask_outputs).reshape(outputs_dim)
+                        loss_pseudo_annotations = criterion(outputs_pseudo_annotations.float(), labels_pseudo_annotations)
+
+                if loss_annotations is not None or loss_pseudo_annotations is not None:
+                    if loss_annotations is not None and loss_pseudo_annotations is not None:
+                        loss = loss_annotations + loss_pseudo_annotations
+                    elif loss_annotations is not None and loss_pseudo_annotations is None:
+                        loss = loss_annotations
+                    elif loss_pseudo_annotations is not None and loss_annotations is None:
+                        loss = loss_pseudo_annotations
+
+                    if annotator in set(annotations):
+                        # record performance for this annotator (discard pseudo annotations)
+                        predictions = outputs_annotations.argmax(dim=1)
+                        accuracy, precision, recall, f1 = self.performance_measures(predictions, labels_annotations, self.averaging_method)
+
+                        # statistics for logging
+                        current_batch_size = inputs.shape[0]
+                        divisor = (i - 1) * self.batch_size + current_batch_size
+                        mean_loss[annotator] = ((i - 1) * self.batch_size * mean_loss[annotator] +
+                                                loss.item() * current_batch_size) / divisor
+                        mean_accuracy[annotator] = (mean_accuracy[annotator] * self.batch_size * (i - 1) +
+                                                    accuracy.item() * current_batch_size) / divisor
+                        mean_precision[annotator] = (mean_precision[annotator] * self.batch_size * (i - 1) +
+                                                     precision.item() * current_batch_size) / divisor
+                        mean_recall[annotator] = (mean_recall[annotator] * self.batch_size * (i - 1) + recall.item() * current_batch_size) / divisor
+                        mean_f1[annotator] = (mean_f1[annotator] * self.batch_size * (i - 1) + f1.item() * current_batch_size) / divisor
+                        loss_history.append(loss.item())
+
+                        if self.writer is not None:
+                            self.writer.add_scalar(f'Loss/Annotator {annotator}/{mode}', mean_loss[annotator], epoch)
+                            self.writer.add_scalar(
+                                f'Accuracy/Annotator {annotator}/{mode}', mean_accuracy[annotator], epoch)
+                            self.writer.add_scalar(
+                                f'Precision/Annotator {annotator}/{mode}', mean_precision[annotator], epoch)
+                            self.writer.add_scalar(f'Recall/Annotator {annotator}/{mode}', mean_recall[annotator], epoch)
+                            self.writer.add_scalar(f'F1 score/Annotator {annotator}/{mode}', mean_f1[annotator], epoch)
+
+                    if mode is 'train':
+                        # Update gradients
+                        if loss_annotations is not None:
+                            retain_graph = False
+                            if loss_pseudo_annotations is not None:
+                                retain_graph = True
+                            loss_annotations.backward(retain_graph=retain_graph)
+                        if loss_pseudo_annotations is not None:
+                            loss_pseudo_annotations.backward()
+
+                        # Optimization step
+                        optimizers[annotator_idx].step()
+                        optimizers[annotator_idx].zero_grad()
+
+            if basic_only:
+                annotator = 'all'
+                if single_annotator is not None:
+                    annotator = single_annotator
+                self._print(
+                    f'Annotator {single_annotator} - Epoch {epoch}: Step {i} / {len_data_loader}' + 10 * ' ', end='\r')
+                outputs = model(inputs)
+
+                # Compute Loss:
+                loss = criterion(outputs.float(), labels)
+
+                # performance measures of the batch
+                predictions = outputs.argmax(dim=1)
+                accuracy, precision, recall, f1 = self.performance_measures(predictions, labels, self.averaging_method)
+
+                # statistics for logging
+                current_batch_size = inputs.shape[0]
+                divisor = (i - 1) * self.batch_size + current_batch_size
+                mean_loss = ((i - 1) * self.batch_size * mean_loss +
+                             loss.item() * current_batch_size) / divisor
+                mean_accuracy = (mean_accuracy * self.batch_size * (i - 1) + accuracy.item() * current_batch_size) / divisor
+                mean_precision = (mean_precision * self.batch_size * (i - 1) + precision.item() * current_batch_size) / divisor
+                mean_recall = (mean_recall * self.batch_size * (i - 1) + recall.item() * current_batch_size) / divisor
+                mean_f1 = (mean_f1 * self.batch_size * (i - 1) + f1.item() * current_batch_size) / divisor
+                loss_history.append(loss.item())
+
+                if mode is 'train':
+                    # Update gradients
+                    loss.backward()
+
+                    # Optimization step
+                    optimizers[0].step()
+
+                if self.writer is not None:
+                    self.writer.add_scalar(f'Loss/Annotator {annotator}/{mode}', mean_loss, epoch)
+                    self.writer.add_scalar(
+                        f'Accuracy/Annotator {annotator}/{mode}', mean_accuracy, epoch)
+                    self.writer.add_scalar(
+                        f'Precision/Annotator {annotator}/{mode}', mean_precision, epoch)
+                    self.writer.add_scalar(f'Recall/Annotator {annotator}/{mode}', mean_recall, epoch)
+                    self.writer.add_scalar(f'F1 score/Annotator {annotator}/{mode}', mean_f1, epoch)
 
         if return_metrics:
             return mean_loss, mean_accuracy, mean_f1

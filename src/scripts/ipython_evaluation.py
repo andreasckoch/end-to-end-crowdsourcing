@@ -6,31 +6,34 @@ from datasets.tripadvisor import TripAdvisorDataset
 from datasets.emotion import EmotionDataset
 from datasets.wikipedia import WikipediaDataset
 
-# Setup
-LABEL_DIM = 3
-LABELS = ['neg', 'neutral', 'pos']
-ANNOTATOR_DIM = 38
+# # # Setup # # #
+# Parameters independent of dataset #
 DEVICE = torch.device('cuda')
 USE_SOFTMAX = True
 MODES = ['train', 'test']
 MODEL_ROOT = '../models'
 LOGS_ROOT = '../logs'
-local_folder_root = 'train_10_20/no_pseudo_labeling/valence'
-local_folder = f'{local_folder_root}/full_training'
-pretrained_model_path = f'{MODEL_ROOT}/{local_folder_root}/pretraining/' + \
-    '0.62222_batch32_lr0.0009900373459039093_20201020-163838_epoch1000.pt'
 
-dataset = EmotionDataset(device=DEVICE)
-dataset.set_emotion('valence')
+# Parameters dependent on dataset #
+LABEL_DIM = 2
+LABELS = ['neg', 'pos']  # 'neutral', 'pos']
+ANNOTATOR_DIM = 3
+local_folder_root = 'train_11_01/complete_training/wikipedia/toxicity'
+local_folder = f'{local_folder_root}/no_pseudo_labeling'
+pretrained_model_path = f'{MODEL_ROOT}/{local_folder_root}/pretraining/' + \
+    '0.55428_batch64_lr0.0007943720850343734_20201101-213326_epoch10.pt'
+
+# dataset = EmotionDataset(device=DEVICE)
+# dataset.set_emotion('valence')
 
 # dataset = TripAdvisorDataset(device=DEVICE)
 
-# task = 'toxicity'
-# group_by_gender = True
-# percentage = 0.05
-# dataset = WikipediaDataset(device=DEVICE, task=task, group_by_gender=group_by_gender, percentage=percentage)
+task = 'toxicity'
+group_by_gender = True
+percentage = 0.05
+dataset = WikipediaDataset(device=DEVICE, task=task, group_by_gender=group_by_gender, percentage=percentage)
 
-
+# Evaluation Loop #
 model_root = f'{MODEL_ROOT}/{local_folder}'
 log_root = f'{LOGS_ROOT}/{local_folder}'
 for model_path in os.listdir(model_root):
