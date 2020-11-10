@@ -74,6 +74,14 @@ class BaseDataset(Dataset):
         if self.annotator_filter is not '':
             self.data_mask = [x['annotator'] == self.annotator_filter for x in self.data[self.mode]]
 
+    def data_shuffle_after_split(self):
+        import random
+        random.shuffle(self.data['train'])
+        random.shuffle(self.data['validation'])
+        random.shuffle(self.data['test'])
+        if self.annotator_filter is not '':
+            self.data_mask = [x['annotator'] == self.annotator_filter for x in self.data[self.mode]]
+
     def set_mode(self, mode):
         if mode not in ['train', 'validation', 'test']:
             raise Exception('mode must be train or validation or test')

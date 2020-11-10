@@ -4,6 +4,8 @@ import torch.nn as nn
 import torch.optim as optim
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 from itertools import compress
+import time
+import sys
 
 from datasets.tripadvisor import TripAdvisorDataset
 from models.ipa2lt_head import Ipa2ltHead
@@ -52,15 +54,18 @@ class Solver(object):
 
     def _get_model(self, basic_only=False, pretrained_basic=False):
         if not basic_only:
-            model = Ipa2ltHead(self.embedding_dim, self.label_dim, self.annotator_dim, use_softmax=self.use_softmax)
+            model = Ipa2ltHead(self.embedding_dim, self.label_dim,
+                               self.annotator_dim, use_softmax=self.use_softmax)
         else:
-            model = BasicNetwork(self.embedding_dim, self.label_dim, use_softmax=self.use_softmax)
+            model = BasicNetwork(self.embedding_dim,
+                                 self.label_dim, use_softmax=self.use_softmax)
         if self.model_weights_path is not '':
             if self.verbose:
                 print(
                     f'Training model with weights of file {self.model_weights_path}')
             if pretrained_basic and not basic_only:
-                model.basic_network.load_state_dict(torch.load(self.model_weights_path))
+                model.basic_network.load_state_dict(
+                    torch.load(self.model_weights_path))
             else:
                 model.load_state_dict(torch.load(self.model_weights_path))
         model.to(self.device)
@@ -68,26 +73,32 @@ class Solver(object):
         return model
 
     def _create_pseudo_labels(self):
-        model = BasicNetwork(self.embedding_dim, self.label_dim, use_softmax=self.use_softmax)
+        model = BasicNetwork(self.embedding_dim,
+                             self.label_dim, use_softmax=self.use_softmax)
         for pseudo_ann in self.pseudo_annotators:
-            model.load_state_dict(torch.load(self.pseudo_model_path_func(**self.pseudo_func_args, annotator=pseudo_ann)))
+            model.load_state_dict(torch.load(self.pseudo_model_path_func(
+                **self.pseudo_func_args, annotator=pseudo_ann)))
             model.to(self.device)
             annotator_list = self.dataset.annotators.copy()
             annotator_list.remove(pseudo_ann)
             for annotator in annotator_list:
                 self.dataset.create_pseudo_labels(annotator, pseudo_ann, model)
 
+    def initialize_optimizer(self, parameters):
+        return optim.AdamW(
+            parameters,
+            lr=self.learning_rate, betas=(0.9, 0.999), eps=1e-08, weight_decay=0.01, amsgrad=False)
+
     def _print(self, *args, **kwargs):
 
         print(*args, **kwargs)
 
     def fit(self, epochs, return_f1=False, single_annotator=None, basic_only=False, fix_base=False, pretrained_basic=False, deep_randomization=False):
-        model = self._get_model(basic_only=basic_only, pretrained_basic=pretrained_basic)
+        model = self._get_model(basic_only=basic_only,
+                                pretrained_basic=pretrained_basic)
         if single_annotator is not None or basic_only:
             self.annotator_dim = 1
-            optimizers = [optim.AdamW([
-                {'params': model.parameters()},
-            ], lr=self.learning_rate, betas=(0.9, 0.999), eps=1e-08, weight_decay=0.01, amsgrad=False)]
+            optimizer = self.initialize_optimizer(model.parameters())
 
         # if self.label_dim is 2:
         #    criterion = nn.BCELoss()
@@ -95,18 +106,10 @@ class Solver(object):
         criterion = nn.CrossEntropyLoss()
         if single_annotator is None and not basic_only:
             if not fix_base:
-                optimizers = [optim.AdamW([
-                    {'params': model.basic_network.parameters()},
-                    {'params': model.bias_matrices[i].parameters()},
-                ],
-                    lr=self.learning_rate, betas=(0.9, 0.999), eps=1e-08, weight_decay=0.01, amsgrad=False)
-                    for i in range(self.annotator_dim)]
+                optimizer = self.initialize_optimizer(model.parameters())
             else:
-                optimizers = [optim.AdamW([
-                    {'params': model.bias_matrices[i].parameters()},
-                ],
-                    lr=self.learning_rate, betas=(0.9, 0.999), eps=1e-08, weight_decay=0.01, amsgrad=False)
-                    for i in range(self.annotator_dim)]
+                optimizer = self.initialize_optimizer(
+                    model.bias_matrices.parameters())
 
         loss_history = []
         inputs = 0
@@ -128,17 +131,21 @@ class Solver(object):
                     self.dataset.no_annotator_filter()
                     annotators = self.dataset.annotators
 
+                self.dataset.data_shuffle_after_split()
+
                 # training
                 self.dataset.set_mode('train')
                 train_loader = torch.utils.data.DataLoader(
                     self.dataset, batch_size=self.batch_size, collate_fn=self.collate_wrapper, shuffle=True)
-                self.fit_epoch_deep_randomization(model, optimizers, criterion, train_loader, epoch, loss_history,
+                self.fit_epoch_deep_randomization(model, optimizer, criterion, train_loader, epoch, loss_history,
                                                   annotators=annotators, basic_only=basic_only)
                 # validation
                 self.dataset.set_mode('validation')
+                if len(self.dataset) is 0:
+                    self.dataset.set_mode('train')
                 val_loader = torch.utils.data.DataLoader(
                     self.dataset, batch_size=self.batch_size, collate_fn=self.collate_wrapper, shuffle=True)
-                _, _, f1 = self.fit_epoch_deep_randomization(model, optimizers, criterion, val_loader, epoch,
+                _, _, f1 = self.fit_epoch_deep_randomization(model, optimizer, criterion, val_loader, epoch,
                                                              loss_history, annotators=annotators,
                                                              basic_only=basic_only, mode='validation', return_metrics=return_f1)
                 if f1 is not None and isinstance(f1, dict):
@@ -152,15 +159,12 @@ class Solver(object):
                         annotator = single_annotator
                         self.dataset.set_annotator_filter(annotator)
                         no_annotator_head = True
-                        optimizer = optimizers[0]
                     elif single_annotator is None and basic_only:
                         annotator = 'all'
                         self.dataset.no_annotator_filter()
                         no_annotator_head = True
-                        optimizer = optimizers[0]
                     else:
                         annotator = self.dataset.annotators[i]
-                        optimizer = optimizers[i]
                         self.dataset.set_annotator_filter(annotator)
                         no_annotator_head = False
 
@@ -184,7 +188,8 @@ class Solver(object):
                                                       epoch, loss_history, mode='validation', return_metrics=True,
                                                       no_annotator_head=no_annotator_head)
                         # essentially micro averaging across annotators
-                        f1 = (samples_looked_at * f1 + f1_ann * len(self.dataset)) / (samples_looked_at + len(self.dataset))
+                        f1 = (samples_looked_at * f1 + f1_ann * len(self.dataset)
+                              ) / (samples_looked_at + len(self.dataset))
                         samples_looked_at += len(self.dataset)
                         # print(f'DEBUG SOLVER - i: {i}, f1: {f1}, f1_ann: {f1_ann}, samples_looked_at: {samples_looked_at},
                         # len dataset: {len(self.dataset)}')
@@ -196,9 +201,11 @@ class Solver(object):
                 if epoch in self.save_at:
                     params = self.save_params
                     if return_f1:
-                        path = get_model_path(self.save_path_head, params['stem'], params['current_time'], params['hyperparams'], f1)
+                        path = get_model_path(
+                            self.save_path_head, params['stem'], params['current_time'], params['hyperparams'], f1)
                     else:
-                        path = get_model_path(self.save_path_head, params['stem'], params['current_time'], params['hyperparams'])
+                        path = get_model_path(
+                            self.save_path_head, params['stem'], params['current_time'], params['hyperparams'])
                     path += f'_epoch{epoch}.pt'
 
                     print(f'Saving model at: {path}')
@@ -237,8 +244,10 @@ class Solver(object):
                 outputs = model(inputs)[annotator_idx]
                 if len(pseudo_labels) is not 0:
                     outputs_pseudo_labels = model(inputs)
+                    opt = self.initialize_optimizer(model.parameters())
                     if isinstance(pseudo_labels, list):
-                        pseudo_annotators = set([ann for sample in pseudo_labels for ann in list(sample.keys())])
+                        pseudo_annotators = set(
+                            [ann for sample in pseudo_labels for ann in list(sample.keys())])
                         losses = [criterion(outputs_pseudo_labels[self.dataset.annotators.index(ann)].float(),
                                             torch.tensor([sample[ann] for sample in pseudo_labels]).to(device=self.device))
                                   for ann in pseudo_annotators]
@@ -253,17 +262,22 @@ class Solver(object):
 
             # performance measures of the batch
             predictions = outputs.argmax(dim=1)
-            accuracy, precision, recall, f1 = self.performance_measures(predictions, labels, self.averaging_method)
+            accuracy, precision, recall, f1 = self.performance_measures(
+                predictions, labels, self.averaging_method)
 
             # statistics for logging
             current_batch_size = inputs.shape[0]
             divisor = (i - 1) * self.batch_size + current_batch_size
             mean_loss = ((i - 1) * self.batch_size * mean_loss +
                          loss.item() * current_batch_size) / divisor
-            mean_accuracy = (mean_accuracy * self.batch_size * (i - 1) + accuracy.item() * current_batch_size) / divisor
-            mean_precision = (mean_precision * self.batch_size * (i - 1) + precision.item() * current_batch_size) / divisor
-            mean_recall = (mean_recall * self.batch_size * (i - 1) + recall.item() * current_batch_size) / divisor
-            mean_f1 = (mean_f1 * self.batch_size * (i - 1) + f1.item() * current_batch_size) / divisor
+            mean_accuracy = (mean_accuracy * self.batch_size * (i - 1) +
+                             accuracy.item() * current_batch_size) / divisor
+            mean_precision = (mean_precision * self.batch_size *
+                              (i - 1) + precision.item() * current_batch_size) / divisor
+            mean_recall = (mean_recall * self.batch_size * (i - 1) +
+                           recall.item() * current_batch_size) / divisor
+            mean_f1 = (mean_f1 * self.batch_size * (i - 1) +
+                       f1.item() * current_batch_size) / divisor
             loss_history.append(loss.item())
 
             if mode is 'train':
@@ -280,18 +294,21 @@ class Solver(object):
                 opt.step()
 
             if self.writer is not None:
-                self.writer.add_scalar(f'Loss/Annotator {annotator}/{mode}', mean_loss, epoch)
+                self.writer.add_scalar(
+                    f'Loss/Annotator {annotator}/{mode}', mean_loss, epoch)
                 self.writer.add_scalar(
                     f'Accuracy/Annotator {annotator}/{mode}', mean_accuracy, epoch)
                 self.writer.add_scalar(
                     f'Precision/Annotator {annotator}/{mode}', mean_precision, epoch)
-                self.writer.add_scalar(f'Recall/Annotator {annotator}/{mode}', mean_recall, epoch)
-                self.writer.add_scalar(f'F1 score/Annotator {annotator}/{mode}', mean_f1, epoch)
+                self.writer.add_scalar(
+                    f'Recall/Annotator {annotator}/{mode}', mean_recall, epoch)
+                self.writer.add_scalar(
+                    f'F1 score/Annotator {annotator}/{mode}', mean_f1, epoch)
 
         if return_metrics:
             return mean_loss, mean_accuracy, mean_f1
 
-    def fit_epoch_deep_randomization(self, model, optimizers, criterion, data_loader, epoch, loss_history, annotators=[], mode='train',
+    def fit_epoch_deep_randomization(self, model, optimizer, criterion, data_loader, epoch, loss_history, annotators=[], mode='train',
                                      return_metrics=False, basic_only=False):
         """
             this function is made to take a dataset with no annotation filter
@@ -310,16 +327,9 @@ class Solver(object):
             mean_precision = 0.0
             mean_recall = 0.0
             mean_f1 = 0.0
-            if len(optimizers) != 1:
-                print('ERROR - please only provide one optimizer when training a basic model only!')
-                return
         else:
             if len(annotators) == 0:
                 print('ERROR - Please provide annotators in correct order!')
-                return
-
-            if len(annotators) != len(optimizers):
-                print('ERROR - Please provide as many optimizers as there are annotators!')
                 return
             mean_loss = {ann: 0.0 for ann in annotators}
             mean_accuracy = {ann: 0.0 for ann in annotators}
@@ -331,40 +341,70 @@ class Solver(object):
         len_data_loader = len(data_loader)
         for i, data in enumerate(data_loader, 1):
             inputs, labels, pseudo_labels, annotations = data.input, data.target, data.pseudo_targets, data.annotations
-            for opt in optimizers:
-                opt.zero_grad()
+            optimizer.zero_grad()
 
             # Generate predictions
             losses = {}
             if len(pseudo_labels) is not 0:
-                pseudo_annotators = set([ann for sample in pseudo_labels for ann in list(sample.keys())])
+                pseudo_annotators = set(
+                    [ann for sample in pseudo_labels for ann in list(sample.keys())])
 
             for annotator_idx, annotator in enumerate(annotators):
                 self._print(
                     f'Annotator {annotator} - Epoch {epoch}: Step {i} / {len_data_loader}' + 10 * ' ', end='\r')
+                # desired_ann = 'male'
+                # log_path = '../logs/train_11_01/bias_inspection.txt'
+                # if i % 5 == 0:           # in [int(0.2 * len_data_loader), int(0.4 * len_data_loader), int(0.6 * len_data_loader),
+                #     #  int(0.8 * len_data_loader), len_data_loader - 1]:
+                #     labels_strings = ['neg', 'pos']
+                #     bias_out = f'Bias matrix at step {i} - annotator {annotator}:'
+                #     bias_out += '\t' + f'{labels_strings[0]}' + '\t ' * 3 + f'{labels_strings[1]}\n'
+                #     for j, labels_string in enumerate(labels_strings):
+                #         bias_out += f'{labels_string}' + ' ' * (25 - len(labels_string))
+                #         for k, labels_string_2 in enumerate(labels_strings):
+                #             bias_out += '\t' * 3 + f'{model.bias_matrices[annotator_idx].weight[j][k].cpu().detach().numpy(): .8f}'
+                #         bias_out += '\n'
+                #     bias_out += '\n'
+                #     with open(log_path, 'a') as f:
+                #         f.write(bias_out)
+                #     time.sleep(1)
+
                 outputs = model(inputs)
                 outputs_annotator = outputs[annotator_idx]
                 loss_annotations = None
+
+                optimizer = self.initialize_optimizer(model.parameters())
+
                 if annotator in set(annotations):
-                    mask_labels = torch.tensor([ann == annotator for ann in annotations]).to(device=self.device)
-                    mask_outputs = torch.tensor([[ann == annotator, ann == annotator] for ann in annotations]).to(device=self.device)
-                    labels_annotations = torch.masked_select(labels, mask_labels)
-                    outputs_dim = (mask_labels[mask_labels].shape[0], outputs_annotator.shape[1])
-                    outputs_annotations = torch.masked_select(outputs_annotator, mask_outputs).reshape(outputs_dim)
-                    loss_annotations = criterion(outputs_annotations.float(), labels_annotations)
+                    mask_labels = torch.tensor(
+                        [ann == annotator for ann in annotations]).to(device=self.device)
+                    mask_outputs = torch.tensor(
+                        [[ann == annotator] * self.label_dim for ann in annotations]).to(device=self.device)
+                    labels_annotations = torch.masked_select(
+                        labels, mask_labels)
+                    outputs_dim = (
+                        mask_labels[mask_labels].shape[0], outputs_annotator.shape[1])
+                    outputs_annotations = torch.masked_select(
+                        outputs_annotator, mask_outputs).reshape(outputs_dim)
+                    loss_annotations = criterion(
+                        outputs_annotations.float(), labels_annotations)
 
                 # search for this annotator in pseudo labels of samples by all other annotators to add the losses
                 loss_pseudo_annotations = None
                 if len(pseudo_labels) is not 0:
                     if annotator in pseudo_annotators:
-                        mask_labels = [annotator in list(sample.keys()) for sample in pseudo_labels]
+                        mask_labels = [annotator in list(
+                            sample.keys()) for sample in pseudo_labels]
                         labels_pseudo_annotations = torch.tensor([int(sample[annotator])
                                                                   for sample in compress(pseudo_labels, mask_labels)]).to(device=self.device)
-                        mask_outputs = torch.tensor([[annotator in list(sample.keys()), annotator in list(sample.keys())]
+                        mask_outputs = torch.tensor([[annotator in list(sample.keys())] * self.label_dim
                                                      for sample in pseudo_labels]).to(device=self.device)
-                        outputs_dim = (len([x for x in compress(mask_labels, mask_labels)]), outputs_annotator.shape[1])
-                        outputs_pseudo_annotations = torch.masked_select(outputs_annotator, mask_outputs).reshape(outputs_dim)
-                        loss_pseudo_annotations = criterion(outputs_pseudo_annotations.float(), labels_pseudo_annotations)
+                        outputs_dim = (
+                            len([x for x in compress(mask_labels, mask_labels)]), outputs_annotator.shape[1])
+                        outputs_pseudo_annotations = torch.masked_select(
+                            outputs_annotator, mask_outputs).reshape(outputs_dim)
+                        loss_pseudo_annotations = criterion(
+                            outputs_pseudo_annotations.float(), labels_pseudo_annotations)
 
                 if loss_annotations is not None or loss_pseudo_annotations is not None:
                     if loss_annotations is not None and loss_pseudo_annotations is not None:
@@ -377,29 +417,36 @@ class Solver(object):
                     if annotator in set(annotations):
                         # record performance for this annotator (discard pseudo annotations)
                         predictions = outputs_annotations.argmax(dim=1)
-                        accuracy, precision, recall, f1 = self.performance_measures(predictions, labels_annotations, self.averaging_method)
+                        accuracy, precision, recall, f1 = self.performance_measures(
+                            predictions, labels_annotations, self.averaging_method)
 
                         # statistics for logging
                         current_batch_size = inputs.shape[0]
-                        divisor = (i - 1) * self.batch_size + current_batch_size
+                        divisor = (i - 1) * self.batch_size + \
+                            current_batch_size
                         mean_loss[annotator] = ((i - 1) * self.batch_size * mean_loss[annotator] +
                                                 loss.item() * current_batch_size) / divisor
                         mean_accuracy[annotator] = (mean_accuracy[annotator] * self.batch_size * (i - 1) +
                                                     accuracy.item() * current_batch_size) / divisor
                         mean_precision[annotator] = (mean_precision[annotator] * self.batch_size * (i - 1) +
                                                      precision.item() * current_batch_size) / divisor
-                        mean_recall[annotator] = (mean_recall[annotator] * self.batch_size * (i - 1) + recall.item() * current_batch_size) / divisor
-                        mean_f1[annotator] = (mean_f1[annotator] * self.batch_size * (i - 1) + f1.item() * current_batch_size) / divisor
+                        mean_recall[annotator] = (mean_recall[annotator] * self.batch_size * (
+                            i - 1) + recall.item() * current_batch_size) / divisor
+                        mean_f1[annotator] = (
+                            mean_f1[annotator] * self.batch_size * (i - 1) + f1.item() * current_batch_size) / divisor
                         loss_history.append(loss.item())
 
                         if self.writer is not None:
-                            self.writer.add_scalar(f'Loss/Annotator {annotator}/{mode}', mean_loss[annotator], epoch)
+                            self.writer.add_scalar(
+                                f'Loss/Annotator {annotator}/{mode}', mean_loss[annotator], epoch)
                             self.writer.add_scalar(
                                 f'Accuracy/Annotator {annotator}/{mode}', mean_accuracy[annotator], epoch)
                             self.writer.add_scalar(
                                 f'Precision/Annotator {annotator}/{mode}', mean_precision[annotator], epoch)
-                            self.writer.add_scalar(f'Recall/Annotator {annotator}/{mode}', mean_recall[annotator], epoch)
-                            self.writer.add_scalar(f'F1 score/Annotator {annotator}/{mode}', mean_f1[annotator], epoch)
+                            self.writer.add_scalar(
+                                f'Recall/Annotator {annotator}/{mode}', mean_recall[annotator], epoch)
+                            self.writer.add_scalar(
+                                f'F1 score/Annotator {annotator}/{mode}', mean_f1[annotator], epoch)
 
                     if mode is 'train':
                         # Update gradients
@@ -407,13 +454,20 @@ class Solver(object):
                             retain_graph = False
                             if loss_pseudo_annotations is not None:
                                 retain_graph = True
-                            loss_annotations.backward(retain_graph=retain_graph)
+                            loss_annotations.backward(
+                                retain_graph=retain_graph)
                         if loss_pseudo_annotations is not None:
                             loss_pseudo_annotations.backward()
 
                         # Optimization step
-                        optimizers[annotator_idx].step()
-                        optimizers[annotator_idx].zero_grad()
+                        # print(f'These are the parameters in optimizer: {optimizer}')
+                        # print(f'Bias matrix weights before: {model.bias_matrices[annotator_idx].weight}')
+                        optimizer.step()
+                        # print(f'Bias matrix weights after: {model.bias_matrices[annotator_idx].weight}')
+                        if annotator == 'male':
+                            self.optimizer, self.model = optimizer, model
+                            # sys.exit()
+                        optimizer.zero_grad()
 
             if basic_only:
                 annotator = 'all'
@@ -428,17 +482,22 @@ class Solver(object):
 
                 # performance measures of the batch
                 predictions = outputs.argmax(dim=1)
-                accuracy, precision, recall, f1 = self.performance_measures(predictions, labels, self.averaging_method)
+                accuracy, precision, recall, f1 = self.performance_measures(
+                    predictions, labels, self.averaging_method)
 
                 # statistics for logging
                 current_batch_size = inputs.shape[0]
                 divisor = (i - 1) * self.batch_size + current_batch_size
                 mean_loss = ((i - 1) * self.batch_size * mean_loss +
                              loss.item() * current_batch_size) / divisor
-                mean_accuracy = (mean_accuracy * self.batch_size * (i - 1) + accuracy.item() * current_batch_size) / divisor
-                mean_precision = (mean_precision * self.batch_size * (i - 1) + precision.item() * current_batch_size) / divisor
-                mean_recall = (mean_recall * self.batch_size * (i - 1) + recall.item() * current_batch_size) / divisor
-                mean_f1 = (mean_f1 * self.batch_size * (i - 1) + f1.item() * current_batch_size) / divisor
+                mean_accuracy = (mean_accuracy * self.batch_size * (i - 1) +
+                                 accuracy.item() * current_batch_size) / divisor
+                mean_precision = (mean_precision * self.batch_size *
+                                  (i - 1) + precision.item() * current_batch_size) / divisor
+                mean_recall = (mean_recall * self.batch_size * (i - 1) +
+                               recall.item() * current_batch_size) / divisor
+                mean_f1 = (mean_f1 * self.batch_size * (i - 1) +
+                           f1.item() * current_batch_size) / divisor
                 loss_history.append(loss.item())
 
                 if mode is 'train':
@@ -446,16 +505,19 @@ class Solver(object):
                     loss.backward()
 
                     # Optimization step
-                    optimizers[0].step()
+                    optimizer.step()
 
                 if self.writer is not None:
-                    self.writer.add_scalar(f'Loss/Annotator {annotator}/{mode}', mean_loss, epoch)
+                    self.writer.add_scalar(
+                        f'Loss/Annotator {annotator}/{mode}', mean_loss, epoch)
                     self.writer.add_scalar(
                         f'Accuracy/Annotator {annotator}/{mode}', mean_accuracy, epoch)
                     self.writer.add_scalar(
                         f'Precision/Annotator {annotator}/{mode}', mean_precision, epoch)
-                    self.writer.add_scalar(f'Recall/Annotator {annotator}/{mode}', mean_recall, epoch)
-                    self.writer.add_scalar(f'F1 score/Annotator {annotator}/{mode}', mean_f1, epoch)
+                    self.writer.add_scalar(
+                        f'Recall/Annotator {annotator}/{mode}', mean_recall, epoch)
+                    self.writer.add_scalar(
+                        f'F1 score/Annotator {annotator}/{mode}', mean_f1, epoch)
 
         if return_metrics:
             return mean_loss, mean_accuracy, mean_f1
@@ -465,7 +527,8 @@ class Solver(object):
 
         # load pretrained model for comparison
         if pretrained_basic_path != '':
-            pretrained_model = BasicNetwork(self.embedding_dim, self.label_dim, use_softmax=self.use_softmax)
+            pretrained_model = BasicNetwork(
+                self.embedding_dim, self.label_dim, use_softmax=self.use_softmax)
             pretrained_model.load_state_dict(torch.load(pretrained_basic_path))
             pretrained_model.to(self.device)
 
@@ -492,7 +555,8 @@ class Solver(object):
                     for j, label in enumerate(labels):
                         bias_out += f'{label}' + ' ' * (15 - len(label))
                         for k, label_2 in enumerate(labels):
-                            bias_out += '\t' * 3 + f'{model.bias_matrices[i].weight[j][k].cpu().detach().numpy(): .4f}'
+                            bias_out += '\t' * 3 + \
+                                f'{model.bias_matrices[i].weight[j][k].cpu().detach().numpy(): .4f}'
                         bias_out += '\n'
                     bias_out += '\n'
                 else:
@@ -523,7 +587,8 @@ class Solver(object):
                     predictions = {}
                     for idx, ann in enumerate(self.dataset.annotators):
                         out_text += f' - Annotator {ann} {output[idx].cpu().detach().numpy()}'
-                        predictions[ann] = [output[idx].argmax(dim=1), output[idx].max(dim=1)]
+                        predictions[ann] = [output[idx].argmax(
+                            dim=1), output[idx].max(dim=1)]
 
                     # compare the prediction with the label for each annotator
                     for idx, ann in enumerate(self.dataset.annotators):
@@ -540,7 +605,8 @@ class Solver(object):
                         if pretrained_output.argmax(dim=1) == label:
                             pretrained_correct += 1
 
-                    predictions_set = set([predictions[ann][0].cpu().detach().numpy().item(0) for ann in self.dataset.annotators])
+                    predictions_set = set([predictions[ann][0].cpu().detach(
+                    ).numpy().item(0) for ann in self.dataset.annotators])
                     if len(predictions_set) is not 1:
                         different_answers += 1
                         different_answers_idx.append(i)
@@ -550,8 +616,10 @@ class Solver(object):
                 overall_len += len(self.dataset)
 
                 # Document correct predictions
-                all_same_accuracies = set([correct[ann] for ann in self.dataset.annotators])
-                acc_out += '-' * 25 + f'   Annotator {annotator}   ' + '-' * 25 + '\n'
+                all_same_accuracies = set([correct[ann]
+                                           for ann in self.dataset.annotators])
+                acc_out += '-' * 25 + \
+                    f'   Annotator {annotator}   ' + '-' * 25 + '\n'
                 acc_out += f'Different answers given by bias matrices {different_answers} / {len(self.dataset)} times\n'
                 acc_out += f'Different answers at points: {different_answers_idx[:min(5, len(different_answers_idx))]}\n'
                 acc_out += f'Accuracies of samples labeled by {annotator}:'
@@ -591,8 +659,11 @@ class Solver(object):
         # averaging for multiclass targets, can be one of [‘micro’, ‘macro’, ‘samples’, ‘weighted’]
         accuracy = accuracy_score(labels, predictions)
         zero_division = 0
-        precision = precision_score(labels, predictions, average=averaging_method, zero_division=zero_division)
-        recall = recall_score(labels, predictions, average=averaging_method, zero_division=zero_division)
-        f1 = f1_score(labels, predictions, average=averaging_method, zero_division=zero_division)
+        precision = precision_score(
+            labels, predictions, average=averaging_method, zero_division=zero_division)
+        recall = recall_score(
+            labels, predictions, average=averaging_method, zero_division=zero_division)
+        f1 = f1_score(labels, predictions, average=averaging_method,
+                      zero_division=zero_division)
 
         return accuracy, precision, recall, f1
