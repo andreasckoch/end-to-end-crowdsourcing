@@ -16,7 +16,7 @@ from utils import get_model_path
 class Solver(object):
 
     def __init__(self, dataset, learning_rate, batch_size, momentum=0.9, model_weights_path='',
-                 writer=None, device=torch.device('cpu'), verbose=True,
+                 writer=None, device=torch.device('cpu'), loss='cross', verbose=True,
                  embedding_dim=50, label_dim=2, annotator_dim=2, averaging_method='macro',
                  save_path_head=None, save_at=None, save_params=None, use_softmax=True,
                  pseudo_annotators=None, pseudo_model_path_func=None, pseudo_func_args={},
@@ -38,6 +38,9 @@ class Solver(object):
         self.averaging_method = averaging_method
         self.use_softmax = use_softmax
 
+        # can either be 'cross', 'bce', 'nll' or 'nll_log' (different versions of cross entropy loss)
+        self.loss = loss
+
         # List with pseudo annotators and separate function for getting a model path
         self.pseudo_annotators = pseudo_annotators
         self.pseudo_model_path_func = pseudo_model_path_func
@@ -55,10 +58,10 @@ class Solver(object):
     def _get_model(self, basic_only=False, pretrained_basic=False):
         if not basic_only:
             model = Ipa2ltHead(self.embedding_dim, self.label_dim,
-                               self.annotator_dim, use_softmax=self.use_softmax)
+                               self.annotator_dim, use_softmax=self.use_softmax, apply_log=self.loss == 'nll_log')
         else:
             model = BasicNetwork(self.embedding_dim,
-                                 self.label_dim, use_softmax=self.use_softmax)
+                                 self.label_dim, use_softmax=self.use_softmax, apply_log=self.loss == 'nll_log')
         if self.model_weights_path is not '':
             if self.verbose:
                 print(
@@ -100,10 +103,12 @@ class Solver(object):
             self.annotator_dim = 1
             optimizer = self.initialize_optimizer(model.parameters())
 
-        # if self.label_dim is 2:
-        #    criterion = nn.BCELoss()
-        # elif self.label_dim > 2:
-        criterion = nn.CrossEntropyLoss()
+        if self.loss == 'bce':
+            criterion = nn.BCELoss()
+        elif self.loss == 'nll' or self.loss == 'nll_log':
+            criterion = nn.NLLLoss()
+        elif self.loss == 'cross':
+            criterion = nn.CrossEntropyLoss()
         if single_annotator is None and not basic_only:
             if not fix_base:
                 optimizer = self.initialize_optimizer(model.parameters())
@@ -337,6 +342,9 @@ class Solver(object):
             mean_recall = {ann: 0.0 for ann in annotators}
             mean_f1 = {ann: 0.0 for ann in annotators}
 
+        if self.loss == 'bce':
+            one_hot = torch.eye(self.label_dim).to(self.device)
+
         # Training loop
         len_data_loader = len(data_loader)
         for i, data in enumerate(data_loader, 1):
@@ -382,10 +390,14 @@ class Solver(object):
                         [[ann == annotator] * self.label_dim for ann in annotations]).to(device=self.device)
                     labels_annotations = torch.masked_select(
                         labels, mask_labels)
+                    labels_annotations_for_performance = labels_annotations.detach().clone()
                     outputs_dim = (
                         mask_labels[mask_labels].shape[0], outputs_annotator.shape[1])
                     outputs_annotations = torch.masked_select(
                         outputs_annotator, mask_outputs).reshape(outputs_dim)
+                    if self.loss == 'bce':
+                        # one hot encode for bce loss
+                        labels_annotations = one_hot[labels_annotations]
                     loss_annotations = criterion(
                         outputs_annotations.float(), labels_annotations)
 
@@ -403,6 +415,9 @@ class Solver(object):
                             len([x for x in compress(mask_labels, mask_labels)]), outputs_annotator.shape[1])
                         outputs_pseudo_annotations = torch.masked_select(
                             outputs_annotator, mask_outputs).reshape(outputs_dim)
+                        if self.loss == 'bce':
+                            # one hot encode for bce loss
+                            labels_pseudo_annotations = one_hot[labels_pseudo_annotations]
                         loss_pseudo_annotations = criterion(
                             outputs_pseudo_annotations.float(), labels_pseudo_annotations)
 
@@ -418,7 +433,7 @@ class Solver(object):
                         # record performance for this annotator (discard pseudo annotations)
                         predictions = outputs_annotations.argmax(dim=1)
                         accuracy, precision, recall, f1 = self.performance_measures(
-                            predictions, labels_annotations, self.averaging_method)
+                            predictions, labels_annotations_for_performance, self.averaging_method)
 
                         # statistics for logging
                         current_batch_size = inputs.shape[0]
@@ -474,8 +489,14 @@ class Solver(object):
                 if single_annotator is not None:
                     annotator = single_annotator
                 self._print(
-                    f'Annotator {single_annotator} - Epoch {epoch}: Step {i} / {len_data_loader}' + 10 * ' ', end='\r')
+                    f'Annotator {annotator} - Epoch {epoch}: Step {i} / {len_data_loader}' + 10 * ' ', end='\r')
                 outputs = model(inputs)
+
+                labels_for_performance = labels.detach().clone()
+
+                if self.loss == 'bce':
+                    # one hot encode for bce loss
+                    labels = one_hot[labels]
 
                 # Compute Loss:
                 loss = criterion(outputs.float(), labels)
@@ -483,7 +504,7 @@ class Solver(object):
                 # performance measures of the batch
                 predictions = outputs.argmax(dim=1)
                 accuracy, precision, recall, f1 = self.performance_measures(
-                    predictions, labels, self.averaging_method)
+                    predictions, labels_for_performance, self.averaging_method)
 
                 # statistics for logging
                 current_batch_size = inputs.shape[0]

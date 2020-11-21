@@ -18,9 +18,9 @@ LOGS_ROOT = '../logs'
 AVG_BIAS_MATRICES = True
 
 # Parameters dependent on dataset #
-local_folder_root = 'train_11_03/complete_training'
+local_folder_root = 'train_11_18/complete_training_test'
 phase = 'full_training'
-pretrained_model_path_no_root = '0.88127_batch64_lr0.0006447904636235589_20201109-144756_epoch300.pt'
+pretrained_model_path_no_root = '0.62281_batch64_lr6.279982075408859e-05_20201118-165053_epoch30.pt'
 
 # label_dim = 3
 # labels = ['neg', 'neutral', 'pos']
@@ -31,23 +31,23 @@ pretrained_model_path_no_root = '0.88127_batch64_lr0.0006447904636235589_2020110
 # dataset_name = 'emotion'
 # task = emotion
 
-# label_dim = 2
-# labels = ['neg', 'pos']
-# annotator_dim = 2
-# dataset = TripAdvisorDataset(device=DEVICE)
-# dataset_name = 'tripadvisor'
-# task = 'gender'
-
 label_dim = 2
 labels = ['neg', 'pos']
 annotator_dim = 2
-task = 'toxicity'
-group_by_gender = True
-only_male_female = True
-percentage = 0.05
-dataset = WikipediaDataset(device=DEVICE, task=task, group_by_gender=group_by_gender,
-                           percentage=percentage, only_male_female=only_male_female)
-dataset_name = 'wikipedia'
+dataset = TripAdvisorDataset(device=DEVICE)
+dataset_name = 'tripadvisor'
+task = 'gender'
+
+# label_dim = 2
+# labels = ['neg', 'pos']
+# annotator_dim = 2
+# task = 'toxicity'
+# group_by_gender = True
+# only_male_female = True
+# percentage = 0.05
+# dataset = WikipediaDataset(device=DEVICE, task=task, group_by_gender=group_by_gender,
+#                            percentage=percentage, only_male_female=only_male_female)
+# dataset_name = 'wikipedia'
 
 
 # label_dim = 3
@@ -91,9 +91,9 @@ for model_path in os.listdir(target_model_path):
                 log_full_path += '_sigmoid'
             log_full_path += f'_{mode}'
             log_full_path += '.txt'
-            # solver = Solver(dataset, 1e-5, 32, model_weights_path=model_full_path, device=torch.device('cuda'),
-            #                 annotator_dim=annotator_dim, label_dim=label_dim, use_softmax=USE_SOFTMAX)
-            # solver.evaluate_model(output_file_path=log_full_path, labels=labels, mode=mode, pretrained_basic_path=pretrained_model_path)
+            solver = Solver(dataset, 1e-5, 32, model_weights_path=model_full_path, device=torch.device('cuda'),
+                            annotator_dim=annotator_dim, label_dim=label_dim, use_softmax=USE_SOFTMAX)
+            solver.evaluate_model(output_file_path=log_full_path, labels=labels, mode=mode, pretrained_basic_path=pretrained_model_path)
 
             if AVG_BIAS_MATRICES and mode is MODES[0]:
                 avg_amount += 1.0

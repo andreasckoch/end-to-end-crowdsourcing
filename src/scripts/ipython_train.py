@@ -27,6 +27,7 @@ NUM_DRAWS = 3
 BATCH_SIZES = [64]
 DEVICE = torch.device('cuda')
 DEEP_RANDOMIZATION = True
+NLL = True
 
 # Setup
 learning_rates = exp10(-np.random.uniform(-np.log10(LR_INT[0]), -np.log10(LR_INT[1]), size=NUM_DRAWS))

@@ -14,11 +14,13 @@ from training import training_loop
 from utils import *
 
 # Config
+# EPOCHS_PHASES = [10, 30, 30, 30]
+# NUM_DRAWS_PHASES = [2, 3, 3, 3]
 EPOCHS_PHASES = [100, 300, 300, 300]
 NUM_DRAWS_PHASES = [5, 10, 10, 10]
 # [10, 100, 300], [10, 100, 200], [10, 100, 200]]
 SAVE_MODEL_AT_PHASES = [[], [10, 100, 200], [10, 100, 200], [10, 100, 200]]
-LOCAL_FOLDER = 'train_11_09/complete_training'
+LOCAL_FOLDER = 'train_11_21/complete_training'
 # MODEL_WEIGHTS_PATH = '../models/train_10_17/tripadvisor/pretraining_softmax/' + \
 #     '0.88136_batch64_lr0.00031867445707134466_20201019-092128_epoch300.pt'
 
@@ -36,6 +38,7 @@ DEEP_RANDOMIZATION = True
 
 # label_dim = 2
 # annotator_dim = 2
+# loss = 'nll'
 # dataset_name = 'wikipedia'
 # task = 'toxicity'
 # percentage = 0.05
@@ -46,6 +49,7 @@ DEEP_RANDOMIZATION = True
 
 # label_dim = 3
 # annotator_dim = 10
+# loss = 'nll'
 # padding_length = 136
 # predict_coarse_attributes_task = False
 # dataset = OrganicDataset(device=DEVICE, predict_coarse_attributes_task=predict_coarse_attributes_task,
@@ -55,19 +59,21 @@ DEEP_RANDOMIZATION = True
 # if predict_coarse_attributes_task:
 #     task = 'coarse_attributes'
 
-# label_dim = 3
-# annotator_dim = 38
-# dataset = EmotionDataset(device=DEVICE)
-# emotion = 'valence'
-# dataset.set_emotion(emotion)
-# dataset_name = 'emotion'
-# task = emotion
+label_dim = 3
+annotator_dim = 38
+loss = 'nll'
+dataset = EmotionDataset(device=DEVICE)
+emotion = 'valence'
+dataset.set_emotion(emotion)
+dataset_name = 'emotion'
+task = emotion
 
-label_dim = 2
-annotator_dim = 2
-dataset = TripAdvisorDataset(device=DEVICE)
-dataset_name = 'tripadvisor'
-task = 'gender'
+# label_dim = 2
+# annotator_dim = 2
+# loss = 'nll'
+# dataset = TripAdvisorDataset(device=DEVICE)
+# dataset_name = 'tripadvisor'
+# task = 'gender'
 
 local_folder = f'{LOCAL_FOLDER}/{dataset_name}/{task}'
 
@@ -79,6 +85,7 @@ solver_params = {
     'annotator_dim': annotator_dim,
     'averaging_method': AVERAGING_METHOD,
     'use_softmax': USE_SOFTMAX,
+    'loss': loss,
 }
 fit_params = {
     'return_f1': True,
