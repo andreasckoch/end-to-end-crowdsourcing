@@ -18,25 +18,25 @@ LOGS_ROOT = '../logs'
 AVG_BIAS_MATRICES = True
 
 # Parameters dependent on dataset #
-local_folder_root = 'train_11_18/complete_training_test'
+local_folder_root = 'train_12_02/sgd_no_log'
 phase = 'full_training'
-pretrained_model_path_no_root = '0.62281_batch64_lr6.279982075408859e-05_20201118-165053_epoch30.pt'
+pretrained_model_path_no_root = '0.56111_batch16_lr0.0006186002626378702_20201202-125751_epoch500.pt'
 
-# label_dim = 3
-# labels = ['neg', 'neutral', 'pos']
-# annotator_dim = 38
-# dataset = EmotionDataset(device=DEVICE)
-# emotion = 'valence'
-# dataset.set_emotion(emotion)
-# dataset_name = 'emotion'
-# task = emotion
+label_dim = 3
+labels = ['neg', 'neutral', 'pos']
+annotator_dim = 38
+dataset = EmotionDataset(device=DEVICE)
+emotion = 'valence'
+dataset.set_emotion(emotion)
+dataset_name = 'emotion'
+task = emotion
 
-label_dim = 2
-labels = ['neg', 'pos']
-annotator_dim = 2
-dataset = TripAdvisorDataset(device=DEVICE)
-dataset_name = 'tripadvisor'
-task = 'gender'
+# label_dim = 2
+# labels = ['neg', 'pos']
+# annotator_dim = 2
+# dataset = TripAdvisorDataset(device=DEVICE)
+# dataset_name = 'tripadvisor'
+# task = 'gender'
 
 # label_dim = 2
 # labels = ['neg', 'pos']

@@ -20,6 +20,7 @@ class Solver(object):
                  embedding_dim=50, label_dim=2, annotator_dim=2, averaging_method='macro',
                  save_path_head=None, save_at=None, save_params=None, use_softmax=True,
                  pseudo_annotators=None, pseudo_model_path_func=None, pseudo_func_args={},
+                 optimizer_name='adam',
                  ):
         self.learning_rate = learning_rate
         self.batch_size = batch_size
@@ -40,6 +41,9 @@ class Solver(object):
 
         # can either be 'cross', 'bce', 'nll' or 'nll_log' (different versions of cross entropy loss)
         self.loss = loss
+
+        # can either be 'sgd' or 'adam'
+        self.optimizer_name = optimizer_name
 
         # List with pseudo annotators and separate function for getting a model path
         self.pseudo_annotators = pseudo_annotators
@@ -88,9 +92,14 @@ class Solver(object):
                 self.dataset.create_pseudo_labels(annotator, pseudo_ann, model)
 
     def initialize_optimizer(self, parameters):
-        return optim.AdamW(
-            parameters,
-            lr=self.learning_rate, betas=(0.9, 0.999), eps=1e-08, weight_decay=0.01, amsgrad=False)
+        if self.optimizer_name == 'adam':
+            return optim.AdamW(
+                parameters,
+                lr=self.learning_rate, betas=(0.9, 0.999), eps=1e-08, weight_decay=0.01, amsgrad=False)
+        elif self.optimizer_name == 'sgd':
+            return optim.SGD(
+                parameters,
+                lr=self.learning_rate, momentum=0.9, weight_decay=0.0005)
 
     def _print(self, *args, **kwargs):
 

@@ -3,7 +3,7 @@ import pandas as pd
 from datasets import BaseDataset
 
 
-def file_processor(path, text_processor, split, sep='|', predict_coarse_attributes_task=False):
+def file_processor(path, text_processor, split, sep='|', predict_coarse_attributes_task=False, entity_filter='organic'):
     data = pd.read_csv(path, sep=sep)[
         ['Sentiment', 'Entity', 'Attribute', 'Sentence', 'Annotator']]
     data = data.rename(columns={
@@ -30,6 +30,9 @@ def file_processor(path, text_processor, split, sep='|', predict_coarse_attribut
         data = data.rename(columns={'attribute': 'label'})
         data.loc[:, 'label'] = data.loc[:, 'label'].apply(
             one_hot_encode_coarse_attributes)
+
+    # filter for entity
+    data = data[data['entity'] == entity_filter]
 
     # embed text
     data['embedding'] = None
@@ -126,13 +129,17 @@ class OrganicDataset(BaseDataset):
 
         self.predict_coarse_attributes_task = args.get(
             'predict_coarse_attributes_task', False)
+        self.entity_filter = args.get('entity_filter', 'organic')
 
         data_train = file_processor(path_train, self.text_processor, 'train',
-                                    predict_coarse_attributes_task=self.predict_coarse_attributes_task)
+                                    predict_coarse_attributes_task=self.predict_coarse_attributes_task,
+                                    entity_filter=self.entity_filter)
         data_validation = file_processor(path_validation, self.text_processor,
-                                         'validation', predict_coarse_attributes_task=self.predict_coarse_attributes_task)
+                                         'validation', predict_coarse_attributes_task=self.predict_coarse_attributes_task,
+                                         entity_filter=self.entity_filter)
         data_test = file_processor(path_test, self.text_processor, 'test', sep=',',
-                                   predict_coarse_attributes_task=self.predict_coarse_attributes_task)
+                                   predict_coarse_attributes_task=self.predict_coarse_attributes_task,
+                                   entity_filter=self.entity_filter)
 
         self.data = pd.concat([data_train, data_validation, data_test], ignore_index=True)
 
