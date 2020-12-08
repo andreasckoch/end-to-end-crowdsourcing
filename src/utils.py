@@ -33,7 +33,7 @@ def get_model_path(path, stem, current_time, params, f1=0.0):
     return path
 
 
-def get_pseudo_model_path_emotion(pseudo_root, annotator, phase=''):
+def get_pseudo_model_path(pseudo_root, annotator, phase=''):
     """
     This function has to have an annotator argument,
     all other arguments should be provided to the solver separately.
@@ -53,7 +53,7 @@ def get_pseudo_model_path_emotion(pseudo_root, annotator, phase=''):
     return f'{root}/{os.listdir(root)[idx]}'
 
 
-def get_pseudo_model_path_tripadvisor(pseudo_root, annotator):
+def get_pseudo_model_path_tripadvisor(pseudo_root, annotator, phase=''):
     """
     This function has to have an annotator argument,
     all other arguments should be provided to the solver separately.

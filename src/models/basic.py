@@ -1,10 +1,11 @@
 from .utils import initialize_weight
 
 import torch.nn as nn
+import torch
 
 
 class BasicNetwork(nn.Module):
-    def __init__(self, embedding_dim, label_dim, use_softmax=True):
+    def __init__(self, embedding_dim, label_dim, use_softmax=True, apply_log=False):
         super().__init__()
 
         self.attention = nn.Linear(embedding_dim, 1, bias=False)
@@ -13,6 +14,7 @@ class BasicNetwork(nn.Module):
         self.softmax = nn.Softmax(dim=0)
         self.sigmoid = nn.Sigmoid()
 
+        self.apply_log = apply_log
         self.use_softmax = use_softmax
 
         self.apply(initialize_weight)
@@ -41,5 +43,8 @@ class BasicNetwork(nn.Module):
                 x = self.softmax(x)
         else:
             x = self.sigmoid(x)
+
+        if self.apply_log:
+            x = torch.clamp(torch.log(torch.clamp(x, 1e-5)), -100.0)
 
         return x

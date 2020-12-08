@@ -49,21 +49,36 @@ class BaseDataset(Dataset):
                 pass
         return self.text_processor_func(self.text_processor_model, text, **argv)
 
-    def data_shuffle(self):
+    def data_shuffle(self, split_included=False):
         import random
         random.seed(123456789)
         random.shuffle(self.data)
 
-        length = len(self.data)
-        eof_train_split = int(length * self.train_val_split * 0.9)
-        eof_val_split = int(length * 0.9)
+        if split_included:
+            self.data = {
+                'train': [point for point in self.data if point['split'] == 'train'],
+                'validation': [point for point in self.data if point['split'] == 'validation'],
+                'test': [point for point in self.data if point['split'] == 'test']
+            }
+        else:
+            length = len(self.data)
+            eof_train_split = int(length * self.train_val_split * 0.9)
+            eof_val_split = int(length * 0.9)
 
-        self.data = {
-            'train': self.data[0:eof_train_split],
-            'validation': self.data[eof_train_split:eof_val_split],
-            'test': self.data[eof_val_split:]
-        }
+            self.data = {
+                'train': self.data[0:eof_train_split],
+                'validation': self.data[eof_train_split:eof_val_split],
+                'test': self.data[eof_val_split:]
+            }
 
+        if self.annotator_filter is not '':
+            self.data_mask = [x['annotator'] == self.annotator_filter for x in self.data[self.mode]]
+
+    def data_shuffle_after_split(self):
+        import random
+        random.shuffle(self.data['train'])
+        random.shuffle(self.data['validation'])
+        random.shuffle(self.data['test'])
         if self.annotator_filter is not '':
             self.data_mask = [x['annotator'] == self.annotator_filter for x in self.data[self.mode]]
 
@@ -131,10 +146,12 @@ class SimpleCustomBatch:
         self.target = torch.stack([sample['label'] for sample in data]).to(device=device)
 
         if 'pseudo_labels' in data[0].keys():
-            self.pseudo_targets = {ann: torch.stack([sample['pseudo_labels'][ann] for sample in data]).to(device=device)
-                                   for ann in data[0]['pseudo_labels'].keys()}
+            self.pseudo_targets = [sample['pseudo_labels'] for sample in data]
         else:
-            self.pseudo_targets = {}
+            self.pseudo_targets = []
+
+        # record annotator information in list
+        self.annotations = ([sample['annotator'] for sample in data])
 
     def pin_memory(self):
         self.input = self.input.pin_memory()
@@ -143,4 +160,8 @@ class SimpleCustomBatch:
 
 
 def collate_wrapper(batch, device=torch.device('cuda')):
+    return SimpleCustomBatch(batch, device)
+
+
+def collate_wrapper_cpu(batch, device=torch.device('cpu')):
     return SimpleCustomBatch(batch, device)
