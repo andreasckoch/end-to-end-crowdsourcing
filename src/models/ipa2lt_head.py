@@ -27,8 +27,8 @@ class Ipa2ltHead(nn.Module):
             normalized = matrix.weight / torch.norm(matrix.weight, dim=1, p=1, keepdim=True)
             matrix.weight = nn.Parameter(normalized.abs())
 
-            # forward pass
-            pred = torch.matmul(x.T, matrix.weight)
+            # forward pass, latent truth dimension is last dimension in x [batch_size, latent_truth]
+            pred = torch.matmul(x, matrix.weight)
             if self.apply_log:
                 pred = torch.clamp(torch.log(torch.clamp(pred, 1e-5)), -100.0)
             out.append(pred)

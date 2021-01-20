@@ -16,13 +16,13 @@ from utils import *
 # Config
 # EPOCHS_PHASES = [10, 30, 30, 30]
 # NUM_DRAWS_PHASES = [2, 3, 3, 3]
-EPOCHS_PHASES = [100, 1000, 3000, 3000, 3000, 3000]
-NUM_DRAWS_PHASES = [5, 0, 8, 5, 8, 8]
+EPOCHS_PHASES = [100, 200, 500, 500, 500, 500]
+NUM_DRAWS_PHASES = [5, 0, 20, 20, 20, 20]
 # [10, 100, 300], [10, 100, 200], [10, 100, 200]]
 SAVE_MODEL_AT_PHASES = [[10], [10, 100, 500, 1000, 2000], [10, 100, 500, 1000, 2000],
                         [10, 100, 500, 1000, 2000], [10, 100, 500, 1000, 2000], [10, 100, 500, 1000, 2000]]
 EARLY_STOPPING_INTERVAL = 10
-LOCAL_FOLDER = 'train_12_21/sgd/nll'
+LOCAL_FOLDER = 'train_01_20/sgd/nll'
 # MODEL_WEIGHTS_PATH = '../models/train_10_17/tripadvisor/pretraining_softmax/' + \
 #     '0.88136_batch64_lr0.00031867445707134466_20201019-092128_epoch300.pt'
 
