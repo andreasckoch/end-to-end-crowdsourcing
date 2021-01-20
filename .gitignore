@@ -137,6 +137,7 @@ data/equity/*
 data/organic/*
 data/wikipedia/**/*.tsv
 data/embeddings/word2vec/*.txt
+data/embeddings/word2vec/**/*.pkl
 models/*
 logs/*
 visuals/*

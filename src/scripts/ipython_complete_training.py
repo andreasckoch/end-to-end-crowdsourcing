@@ -16,11 +16,13 @@ from utils import *
 # Config
 # EPOCHS_PHASES = [10, 30, 30, 30]
 # NUM_DRAWS_PHASES = [2, 3, 3, 3]
-EPOCHS_PHASES = [100, 500, 500, 500, 500]
-NUM_DRAWS_PHASES = [5, 8, 8, 8, 8]
+EPOCHS_PHASES = [100, 1000, 3000, 3000, 3000, 3000]
+NUM_DRAWS_PHASES = [5, 0, 8, 5, 8, 8]
 # [10, 100, 300], [10, 100, 200], [10, 100, 200]]
-SAVE_MODEL_AT_PHASES = [[10], [10, 100, 200, 300, 400], [10, 100, 200, 300, 400], [10, 100, 200, 300, 400], [10, 100, 200, 300, 400]]
-LOCAL_FOLDER = 'train_12_05/sgd/cross'
+SAVE_MODEL_AT_PHASES = [[10], [10, 100, 500, 1000, 2000], [10, 100, 500, 1000, 2000],
+                        [10, 100, 500, 1000, 2000], [10, 100, 500, 1000, 2000], [10, 100, 500, 1000, 2000]]
+EARLY_STOPPING_INTERVAL = 10
+LOCAL_FOLDER = 'train_12_21/sgd/nll'
 # MODEL_WEIGHTS_PATH = '../models/train_10_17/tripadvisor/pretraining_softmax/' + \
 #     '0.88136_batch64_lr0.00031867445707134466_20201019-092128_epoch300.pt'
 
@@ -48,33 +50,39 @@ OPTIMIZER = 'sgd'
 # dataset = WikipediaDataset(device=DEVICE, task=task, group_by_gender=group_by_gender,
 #                            percentage=percentage, only_male_female=only_male_female)
 
-# label_dim = 3
-# annotator_dim = 10
-# loss = 'nll'
-# padding_length = 136
-# predict_coarse_attributes_task = False
-# dataset = OrganicDataset(device=DEVICE, predict_coarse_attributes_task=predict_coarse_attributes_task,
-#                          padding_length=padding_length)
-# dataset_name = 'organic'
-# task = 'sentiment'
-# if predict_coarse_attributes_task:
-#     task = 'coarse_attributes'
+label_dim = 3
+annotator_dim = 10
+loss = 'nll'
+padding_length = 136
+predict_coarse_attributes_task = False
+dataset_name = 'organic'
+domain_embedding_path = f'../data/embeddings/word2vec/fine_tuned/{dataset_name}_glove.pkl'
+dataset = OrganicDataset(device=DEVICE, predict_coarse_attributes_task=predict_coarse_attributes_task,
+                         padding_length=padding_length, domain_embedding_path=domain_embedding_path)
+task = 'sentiment'
+if predict_coarse_attributes_task:
+    task = 'coarse_attributes'
+if domain_embedding_path is not '':
+    task += '_fine_tuned_emb'
 
 # label_dim = 3
 # annotator_dim = 38
-# loss = 'nll'
-# dataset = EmotionDataset(device=DEVICE)
+# loss = 'nll_log'
+# dataset_name = 'emotion'
+# domain_embedding_path = f'../data/embeddings/word2vec/fine_tuned/{dataset_name}_glove.pkl'
+# dataset = EmotionDataset(device=DEVICE, domain_embedding_path=domain_embedding_path)
 # emotion = 'valence'
 # dataset.set_emotion(emotion)
-# dataset_name = 'emotion'
 # task = emotion
+# if domain_embedding_path is not '':
+#     task += '_fine_tuned_emb'
 
-label_dim = 2
-annotator_dim = 2
-loss = 'cross'
-dataset = TripAdvisorDataset(device=DEVICE)
-dataset_name = 'tripadvisor'
-task = 'gender'
+# label_dim = 2
+# annotator_dim = 2
+# loss = 'nll'
+# dataset = TripAdvisorDataset(device=DEVICE)
+# dataset_name = 'tripadvisor'
+# task = 'gender'
 
 local_folder = f'{LOCAL_FOLDER}/{dataset_name}/{task}'
 
@@ -92,6 +100,7 @@ solver_params = {
 fit_params = {
     'return_f1': True,
     'deep_randomization': DEEP_RANDOMIZATION,
+    'early_stopping_interval': EARLY_STOPPING_INTERVAL,
 }
 models_root_path = f'../models/{local_folder}'
 pseudo_func_args = {
@@ -106,7 +115,8 @@ pseudo_model_path_func = get_pseudo_model_path
 
 # Full training loop (comment out as needed)
 phases = ['individual_training', 'pretraining',
-          'full_training', 'no_pseudo_labeling', 'fix_base']
+          'full_training', 'no_pseudo_labeling',
+          'fix_base', 'basic_only']
 for phase in phases:
     print(f'NEW PHASE - now in phase {phase}')
     # if phase is 'individual_training':
@@ -179,20 +189,38 @@ for phase in phases:
         training_loop(dataset, BATCH_SIZES, learning_rates, local_folder, EPOCHS_PHASES[3],
                       solver_params_copy, fit_params_copy, phase_path=phase)
 
-    if phase is 'fix_base':
+    # if phase is 'fix_base':
+    #     learning_rates = get_learning_rates(
+    #         LR_INT[0], LR_INT[1], NUM_DRAWS_PHASES[4])
+    #     solver_params_copy = solver_params.copy()
+    #     solver_params_copy.update({
+    #         'save_at': SAVE_MODEL_AT_PHASES[4],
+    #         # get best model from pretraining
+    #         'model_weights_path': get_best_model_path(f'{models_root_path}/{phases[1]}'),
+    #     })
+    #     fit_params_copy = fit_params.copy()
+    #     fit_params_copy.update({
+    #         'epochs': EPOCHS_PHASES[4],
+    #         'pretrained_basic': True,
+    #         'fix_base': True,
+    #     })
+    #     training_loop(dataset, BATCH_SIZES, learning_rates, local_folder, EPOCHS_PHASES[4],
+    #                   solver_params_copy, fit_params_copy, phase_path=phase)
+
+    if phase is 'basic_only':
         learning_rates = get_learning_rates(
-            LR_INT[0], LR_INT[1], NUM_DRAWS_PHASES[4])
+            LR_INT[0], LR_INT[1], NUM_DRAWS_PHASES[5])
         solver_params_copy = solver_params.copy()
         solver_params_copy.update({
-            'save_at': SAVE_MODEL_AT_PHASES[4],
+            'save_at': SAVE_MODEL_AT_PHASES[5],
             # get best model from pretraining
             'model_weights_path': get_best_model_path(f'{models_root_path}/{phases[1]}'),
         })
         fit_params_copy = fit_params.copy()
         fit_params_copy.update({
-            'epochs': EPOCHS_PHASES[4],
+            'epochs': EPOCHS_PHASES[5],
             'pretrained_basic': True,
-            'fix_base': True,
+            'basic_only': True,
         })
-        training_loop(dataset, BATCH_SIZES, learning_rates, local_folder, EPOCHS_PHASES[4],
+        training_loop(dataset, BATCH_SIZES, learning_rates, local_folder, EPOCHS_PHASES[5],
                       solver_params_copy, fit_params_copy, phase_path=phase)

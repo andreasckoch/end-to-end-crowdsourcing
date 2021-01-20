@@ -28,7 +28,7 @@ class Ipa2ltHead(nn.Module):
             matrix.weight = nn.Parameter(normalized.abs())
 
             # forward pass
-            pred = matrix(x)
+            pred = torch.matmul(x.T, matrix.weight)
             if self.apply_log:
                 pred = torch.clamp(torch.log(torch.clamp(pred, 1e-5)), -100.0)
             out.append(pred)
