@@ -80,11 +80,8 @@ class TripAdvisorDataset(BaseDataset):
 
         self.annotators = ['f', 'm']
         
-        if male_noise != 0:
-            data_m = add_noise(data_m, male_noise)
-            
-        if female_noise != 0:
-            data_f = add_noise(data_f, female_noise)
+        data_m = add_noise(data_m, male_noise)
+        data_f = add_noise(data_f, female_noise)
             
         self.data = data_f + data_m
         self.data_shuffle()
