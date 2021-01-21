@@ -20,7 +20,7 @@ class Solver(object):
                  embedding_dim=50, label_dim=2, annotator_dim=2, averaging_method='macro',
                  save_path_head=None, save_at=None, save_params=None, use_softmax=True,
                  pseudo_annotators=None, pseudo_model_path_func=None, pseudo_func_args={},
-                 optimizer_name='adam',
+                 optimizer_name='adam', early_stopping_margin=1e-4,
                  ):
         self.learning_rate = learning_rate
         self.batch_size = batch_size
@@ -38,6 +38,7 @@ class Solver(object):
         self.verbose = verbose
         self.averaging_method = averaging_method
         self.use_softmax = use_softmax
+        self.early_stopping_margin = early_stopping_margin
 
         # can either be 'cross', 'bce', 'nll' or 'nll_log' (different versions of cross entropy loss)
         self.loss = loss
@@ -79,6 +80,24 @@ class Solver(object):
 
         return model
 
+    def _save_model(self, epoch, model, return_f1=False, f1=0.0, early_stopping=False):
+        if self.save_at is not None and self.save_path_head is not None and self.save_params is not None:
+            if epoch in self.save_at or early_stopping:
+                params = self.save_params
+                if return_f1:
+                    path = get_model_path(
+                        self.save_path_head, params['stem'], params['current_time'], params['hyperparams'], f1)
+                else:
+                    path = get_model_path(
+                        self.save_path_head, params['stem'], params['current_time'], params['hyperparams'])
+                path += f'_epoch{epoch}'
+                if early_stopping:
+                    path += f'_early_stopping'
+                path += '.pt'
+
+                print(f'Saving model at: {path}')
+                torch.save(model.state_dict(), path)
+
     def _create_pseudo_labels(self):
         model = BasicNetwork(self.embedding_dim,
                              self.label_dim, use_softmax=self.use_softmax)
@@ -105,7 +124,8 @@ class Solver(object):
 
         print(*args, **kwargs)
 
-    def fit(self, epochs, return_f1=False, single_annotator=None, basic_only=False, fix_base=False, pretrained_basic=False, deep_randomization=False):
+    def fit(self, epochs, return_f1=False, single_annotator=None, basic_only=False, fix_base=False,
+            pretrained_basic=False, deep_randomization=False, early_stopping_interval=0):
         model = self._get_model(basic_only=basic_only,
                                 pretrained_basic=pretrained_basic)
         if single_annotator is not None or basic_only:
@@ -126,6 +146,8 @@ class Solver(object):
                     model.bias_matrices.parameters())
 
         loss_history = []
+        if early_stopping_interval is not 0:
+            val_mean_losses = []
         inputs = 0
         labels = 0
 
@@ -159,11 +181,13 @@ class Solver(object):
                     self.dataset.set_mode('train')
                 val_loader = torch.utils.data.DataLoader(
                     self.dataset, batch_size=self.batch_size, collate_fn=self.collate_wrapper, shuffle=True)
-                _, _, f1 = self.fit_epoch_deep_randomization(model, optimizer, criterion, val_loader, epoch,
-                                                             loss_history, annotators=annotators,
-                                                             basic_only=basic_only, mode='validation', return_metrics=return_f1)
+                val_loss, _, f1 = self.fit_epoch_deep_randomization(model, optimizer, criterion, val_loader, epoch,
+                                                                    loss_history, annotators=annotators,
+                                                                    basic_only=basic_only, mode='validation', return_metrics=return_f1)
                 if f1 is not None and isinstance(f1, dict):
                     f1 = sum(f1.values()) / len(f1.values())
+                if val_loss is not None and isinstance(val_loss, dict):
+                    val_loss = sum(val_loss.values()) / len(val_loss.values())
 
             else:
                 # loop over all annotators
@@ -198,9 +222,9 @@ class Solver(object):
                             self.dataset.set_mode('train')
                             val_loader = torch.utils.data.DataLoader(
                                 self.dataset, batch_size=self.batch_size, collate_fn=self.collate_wrapper)
-                        _, _, f1_ann = self.fit_epoch(model, optimizer, criterion, val_loader, annotator, i,
-                                                      epoch, loss_history, mode='validation', return_metrics=True,
-                                                      no_annotator_head=no_annotator_head)
+                        val_loss, _, f1_ann = self.fit_epoch(model, optimizer, criterion, val_loader, annotator, i,
+                                                             epoch, loss_history, mode='validation', return_metrics=True,
+                                                             no_annotator_head=no_annotator_head)
                         # essentially micro averaging across annotators
                         f1 = (samples_looked_at * f1 + f1_ann * len(self.dataset)
                               ) / (samples_looked_at + len(self.dataset))
@@ -211,19 +235,26 @@ class Solver(object):
                         self.fit_epoch(model, optimizer, criterion, val_loader, annotator, i,
                                        epoch, loss_history, mode='validation', no_annotator_head=no_annotator_head)
 
-            if self.save_at is not None and self.save_path_head is not None and self.save_params is not None:
-                if epoch in self.save_at:
-                    params = self.save_params
-                    if return_f1:
-                        path = get_model_path(
-                            self.save_path_head, params['stem'], params['current_time'], params['hyperparams'], f1)
-                    else:
-                        path = get_model_path(
-                            self.save_path_head, params['stem'], params['current_time'], params['hyperparams'])
-                    path += f'_epoch{epoch}.pt'
+            self._save_model(epoch, model, return_f1=return_f1, f1=f1)
 
-                    print(f'Saving model at: {path}')
-                    torch.save(model.state_dict(), path)
+            # if mean loss doesn't change over several epochs, stop early with training
+            if early_stopping_interval is not 0:
+                val_mean_losses.append(val_loss)
+                if len(val_mean_losses) > early_stopping_interval:
+                    loss_begin = val_mean_losses[-early_stopping_interval]
+                    stop_margin_step = self.early_stopping_margin * loss_begin
+                    stop_margins = [loss_begin - stop_margin_step,
+                                    loss_begin + stop_margin_step]
+                    losses_interval = val_mean_losses[-early_stopping_interval:]
+                    mean_loss_interval = sum(
+                        losses_interval) / len(losses_interval)
+                    if mean_loss_interval > stop_margins[0] and mean_loss_interval < stop_margins[1]:
+                        self._print(f'Stopping early at epoch {epoch} with loss {mean_loss_interval}')
+                        self._save_model(epoch, model, return_f1=return_f1, f1=f1, early_stopping=True)
+                        if return_f1:
+                            return model, f1
+                        else:
+                            return model
 
         if self.verbose:
             self._print('Finished Training' + 20 * ' ')
@@ -488,9 +519,9 @@ class Solver(object):
                         # print(f'Bias matrix weights before: {model.bias_matrices[annotator_idx].weight}')
                         optimizer.step()
                         # print(f'Bias matrix weights after: {model.bias_matrices[annotator_idx].weight}')
-                        if annotator == 'male':
-                            self.optimizer, self.model = optimizer, model
-                            # sys.exit()
+                        # if annotator == 'male':
+                        #     self.optimizer, self.model = optimizer, model
+                        # sys.exit()
                         optimizer.zero_grad()
 
             if basic_only:
@@ -552,8 +583,8 @@ class Solver(object):
         if return_metrics:
             return mean_loss, mean_accuracy, mean_f1
 
-    def evaluate_model(self, output_file_path, labels=None, mode='train', pretrained_basic_path=''):
-        model = self._get_model()
+    def evaluate_model(self, output_file_path, labels=None, mode='train', pretrained_basic_path='', basic_only=False):
+        model = self._get_model(basic_only=basic_only)
 
         # load pretrained model for comparison
         if pretrained_basic_path != '':
@@ -561,6 +592,17 @@ class Solver(object):
                 self.embedding_dim, self.label_dim, use_softmax=self.use_softmax)
             pretrained_model.load_state_dict(torch.load(pretrained_basic_path))
             pretrained_model.to(self.device)
+
+        # also document loss
+        if self.loss == 'bce':
+            one_hot = torch.eye(self.label_dim).to(self.device)
+            criterion = nn.BCELoss()
+        elif self.loss == 'nll' or self.loss == 'nll_log':
+            criterion = nn.NLLLoss()
+        elif self.loss == 'cross':
+            criterion = nn.CrossEntropyLoss()
+        mean_loss = 0.0
+        annotators_mean_losses = {}
 
         # write annotation bias matrices into log file
         import sys
@@ -570,78 +612,117 @@ class Solver(object):
             self.dataset.set_mode(mode)
             out_text = ''
             acc_out = ''
-            bias_out = 'Annotation bias matrices\n\n'
+            bias_conf_out = 'Annotation bias and confusion matrices\n\n'
             overall_correct = 0
             overall_len = 0
             if pretrained_basic_path != '':
                 pretrained_correct = 0
-            for i, annotator in enumerate(self.dataset.annotators):
-                bias_out += f'Annotator {annotator}\n'
-                bias_out += f'Output\\LatentTruth'
-                if labels is not None:
-                    for label in labels:
-                        bias_out += '\t' * 3 + f'{label}'
-                    bias_out += '\n'
-                    for j, label in enumerate(labels):
-                        bias_out += f'{label}' + ' ' * (15 - len(label))
-                        for k, label_2 in enumerate(labels):
-                            bias_out += '\t' * 3 + \
-                                f'{model.bias_matrices[i].weight[j][k].cpu().detach().numpy(): .4f}'
-                        bias_out += '\n'
-                    bias_out += '\n'
-                else:
-                    bias_out += f'{model.bias_matrices[i].weight.cpu().detach().numpy()}\n\n'
-
+            for ann_idx, annotator in enumerate(self.dataset.annotators):
                 correct = {ann: 0 for ann in self.dataset.annotators}
 
                 different_answers = 0
                 different_answers_idx = []
 
+                annotators_mean_losses[annotator] = 0.0
+
+                confusion_matrix = np.zeros((self.label_dim, self.label_dim))
+
                 self.dataset.set_annotator_filter(annotator)
                 # batch_size needs to be 1
-                val_loader = torch.utils.data.DataLoader(
+                data_loader = torch.utils.data.DataLoader(
                     self.dataset, batch_size=1, collate_fn=self.collate_wrapper)
 
-                for i, data in enumerate(val_loader, 1):
+                for sample_idx, data in enumerate(data_loader, 1):
                     # Prepare inputs to be passed to the model
                     inp, label = data.input, data.target
 
                     # Generate predictions
-                    latent_truth = model.basic_network(inp)
+                    if basic_only:
+                        latent_truth = model(inp)
+                    else:
+                        latent_truth = model.basic_network(inp)
                     output = model(inp)
                     if pretrained_basic_path != '':
                         pretrained_output = pretrained_model(inp)
 
-                    # print input/output
-                    out_text += f'Point {i} - Label by {annotator}: {label.cpu().numpy()} - Latent truth {latent_truth.cpu().detach().numpy()}'
-                    predictions = {}
-                    for idx, ann in enumerate(self.dataset.annotators):
-                        out_text += f' - Annotator {ann} {output[idx].cpu().detach().numpy()}'
-                        predictions[ann] = [output[idx].argmax(
-                            dim=1), output[idx].max(dim=1)]
+                    # calculate loss
+                    if self.loss == 'bce':
+                        # one hot encode for bce loss
+                        label = one_hot[label]
 
-                    # compare the prediction with the label for each annotator
-                    for idx, ann in enumerate(self.dataset.annotators):
-                        if predictions[ann][0] == label:
-                            # annotator_highest_pred = max(filtered_preds, key=filtered_preds.get)
-                            correct[ann] += 1
+                    if not basic_only:
+                        annotators_mean_losses[annotator] += criterion(
+                            output[ann_idx].float(), label).item()
 
-                    # compare the prediction with the label for the annotator that created the label
-                    if predictions[annotator][0] == label:
-                        overall_correct += 1
+                        # generate confusion matrix
+                        confusion_matrix[label.cpu().numpy().item(0)][latent_truth.argmax(
+                            dim=1).cpu().detach().numpy().item(0)] += 1.0
+
+                        # print input/output
+                        out_text += f'Point {sample_idx} - Label by {annotator}: {label.cpu().numpy()} - Latent truth {latent_truth.cpu().detach().numpy()}'
+                        predictions = {}
+                        for idx, ann in enumerate(self.dataset.annotators):
+                            out_text += f' - Annotator {ann} {output[idx].cpu().detach().numpy()}'
+                            predictions[ann] = [output[idx].argmax(
+                                dim=1), output[idx].max(dim=1)]
+
+                        # compare the prediction with the label for each annotator
+                        for idx, ann in enumerate(self.dataset.annotators):
+                            if predictions[ann][0] == label:
+                                # annotator_highest_pred = max(filtered_preds, key=filtered_preds.get)
+                                correct[ann] += 1
+
+                        # compare the prediction with the label for the annotator that created the label
+                        if predictions[annotator][0] == label:
+                            overall_correct += 1
+
+                        predictions_set = set([predictions[ann][0].cpu().detach(
+                        ).numpy().item(0) for ann in self.dataset.annotators])
+                        if len(predictions_set) is not 1:
+                            different_answers += 1
+                            different_answers_idx.append(sample_idx)
+
+                    else:
+                        if output.argmax(dim=1) == label:
+                            overall_correct += 1
 
                     # compare the prediction with the label for the pretrained model
                     if pretrained_basic_path != '':
                         if pretrained_output.argmax(dim=1) == label:
                             pretrained_correct += 1
 
-                    predictions_set = set([predictions[ann][0].cpu().detach(
-                    ).numpy().item(0) for ann in self.dataset.annotators])
-                    if len(predictions_set) is not 1:
-                        different_answers += 1
-                        different_answers_idx.append(i)
-
                     out_text += '\n'
+
+                if not basic_only:
+                    annotators_mean_losses[annotator] /= len(self.dataset)
+                    mean_loss += annotators_mean_losses[annotator]
+
+                    for row in confusion_matrix:
+                        row /= row.sum()
+
+                    bias_conf_out += f'Annotator {annotator}\n'
+                    bias_conf_out += f'Output\\LatentTruth'
+                    if labels is not None:
+                        for label in labels:
+                            bias_conf_out += '\t' * 3 + f'{label}'
+                        bias_conf_out += '\t' * 5 + f'Label\\LatentTruth'
+                        for label in labels:
+                            bias_conf_out += '\t' * 3 + f'{label}'
+                        bias_conf_out += '\n'
+                        for j, label in enumerate(labels):
+                            bias_conf_out += f'{label}' + ' ' * (15 - len(label))
+                            for k, label_2 in enumerate(labels):
+                                bias_conf_out += '\t' * 3 + \
+                                    f'{model.bias_matrices[ann_idx].weight[j][k].cpu().detach().numpy(): .4f}'
+                            bias_conf_out += '\t' * 5
+                            bias_conf_out += f'{label}' + ' ' * (15 - len(label))
+                            for k, label_2 in enumerate(labels):
+                                bias_conf_out += '\t' * 3 + \
+                                    f'{confusion_matrix[j][k]: .4f}'
+                            bias_conf_out += '\n'
+                        bias_conf_out += '\n'
+                    else:
+                        bias_conf_out += f'{model.bias_matrices[ann_idx].weight.cpu().detach().numpy()}\n\n'
 
                 overall_len += len(self.dataset)
 
@@ -663,10 +744,21 @@ class Solver(object):
                     acc_out += f'Annotator {ann}: {correct[ann]} / {len(self.dataset)}     '
                 acc_out += '\n\n'
 
+            # Document Loss
+            mean_loss /= len(self.dataset.annotators)
+            loss_out = f'Mean Loss (over annotators & samples): {mean_loss:.5f}\n'
+            loss_out += f'Mean Loss for each annotator (over samples):\n'
+            for ann in self.dataset.annotators:
+                loss_out += f'Annotator {ann}: {annotators_mean_losses[ann]:.5f}        '
+            loss_out += '\n\n\n'
+
             # Document overall accuracy
             overall_acc_out = 'Overall accuracies\n\n'
             overall_accuracy = overall_correct / overall_len
-            overall_acc_out += f'Accuracy with bias matrices: {overall_correct} / {overall_len} or as percentage: {overall_accuracy:.5f}\n'
+            overall_acc_out += f'Accuracy after extensive training'
+            if not basic_only:
+                overall_acc_out += ' with bias matrices'
+            overall_acc_out += f': {overall_correct} / {overall_len} or as percentage: {overall_accuracy:.5f}\n'
             if pretrained_basic_path != '':
                 pretrained_accuracy = pretrained_correct / overall_len
                 overall_acc_out += f'Accuracy with pretrained model: {pretrained_correct} / {overall_len} ' + \
@@ -675,10 +767,12 @@ class Solver(object):
                 overall_acc_out += '\n\n'
 
             print(overall_acc_out)
-            print(bias_out)
-            print(acc_out)
-            print('\n' * 30)
-            print(out_text)
+            if not basic_only:
+                print(loss_out)
+                print(bias_conf_out)
+                print(acc_out)
+                print('\n' * 30)
+                print(out_text)
             sys.stdout = original_stdout
 
     @staticmethod

@@ -24,7 +24,7 @@ class BaseDataset(Dataset):
 
     def _build_text_processor(self, **argv):
         text_processor = argv.get('text_processor', 'word2vec').lower()
-        text_processor_filters = argv.get('text_processor_filters', [])
+        text_processor_filters = argv.get('text_processor_filters', ['lowercase'])
 
         if text_processor == 'word2vec':
             from datasets.processors.word2vec import _build_text_processor, text_processor
