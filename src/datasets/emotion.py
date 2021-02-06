@@ -52,7 +52,7 @@ class EmotionDataset(BaseDataset):
         super().__init__(**args)
 
         self.emotions = ['anger', 'disgust', 'fear', 'joy', 'sadness', 'surprise', 'valence']
-        self.emotion = 'anger'
+        self.emotion = 'valence'
 
         root = f'{self.root_data}emotion'
         path = f'{root}/affect.tsv'
@@ -68,6 +68,12 @@ class EmotionDataset(BaseDataset):
             left, right, on=['!amt_annotation_ids', 'annotator', 'orig_id']), data)
 
         self.data = pd.merge(emotions, affect, how='left', left_on='orig_id', right_on='id')
+        
+        ds_experiment = args.get('ds_experiment', False)
+        if ds_experiment:
+            ds_labels = pd.read_csv(f'{root}/fds_generated_labels.tsv', sep='\t').rename(columns={"label": "ds_label"})
+            self.data = pd.merge(self.data, ds_labels, how='left', left_on='id', right_on='id')
+            self.emotion = 'ds'
 
         self.annotators = self.data.annotator.unique().tolist()
         self.data = self.data.to_dict('records')
@@ -77,7 +83,7 @@ class EmotionDataset(BaseDataset):
         self.pseudo_labels_key = f'{self.emotion}_pseudo_labels'
 
     def set_emotion(self, emotion):
-        if emotion not in self.emotions:
+        if emotion not in self.emotions + ['ds']:
             raise Exception(f"Emotion must be one of these: \n{','.join(self.emotions)}")
         self.emotion = emotion
         self.pseudo_labels_key = f'{self.emotion}_pseudo_labels'
@@ -93,10 +99,38 @@ class EmotionDataset(BaseDataset):
         out['embedding'] = torch.tensor(datapoint['embedding'], device=self.device, dtype=torch.float32)
         out['label'] = torch.tensor(int(datapoint[f'{self.emotion}_label']), device=self.device, dtype=torch.long)
 
-        if datapoint[self.pseudo_labels_key] is None:
+        if (self.pseudo_labels_key not in datapoint) or datapoint[self.pseudo_labels_key] is None:
             out[self.pseudo_labels_key] = {}
         out['pseudo_labels'] = {}
         for pseudo_ann in out[self.pseudo_labels_key].keys():
             out['pseudo_labels'][pseudo_ann] = torch.tensor(int(datapoint[self.pseudo_labels_key][pseudo_ann]), device=self.device, dtype=torch.long)
 
         return out
+    
+    def data_shuffle(self, split_included=False):
+        import random
+        random.seed(123456789)
+        random.shuffle(self.data)
+        
+        headlines = []
+        for datapoint in self.data:
+            headlines.append(datapoint['text'])
+        headlines = list(set(headlines))
+        random.shuffle(headlines)
+
+        length = 100
+        eof_train_split = int(length * self.train_val_split * 0.9)
+        eof_val_split = int(length * 0.9)
+        
+        train_filter = [(x['text'] in headlines[0:eof_train_split]) for x in self.data] 
+        valid_filter = [(x['text'] in headlines[eof_train_split:eof_val_split]) for x in self.data] 
+        test_filter  = [(x['text'] in headlines[eof_val_split:]) for x in self.data]
+
+        self.data = {
+            'train': [x for x in compress(self.data, train_filter)],
+            'validation': [x for x in compress(self.data, valid_filter)],
+            'test': [x for x in compress(self.data, test_filter)]
+        }
+
+        if self.annotator_filter is not '':
+            self.data_mask = [x['annotator'] == self.annotator_filter for x in self.data[self.mode]]
