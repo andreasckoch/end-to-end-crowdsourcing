@@ -14,6 +14,7 @@ from sklearn.feature_extraction.text import CountVectorizer
 
 from datasets.emotion import EmotionDataset
 from datasets.organic import OrganicDataset
+from datasets.tripadvisor import TripAdvisorDataset
 
 
 def glove2dict(glove_filename):
@@ -35,14 +36,21 @@ pre_glove = glove2dict(glove_path)
 # emotion = 'valence'
 # dataset.set_emotion(emotion)
 
-label_dim = 3
-annotator_dim = 10
-padding_length = 136
-predict_coarse_attributes_task = False
-dataset = OrganicDataset(predict_coarse_attributes_task=predict_coarse_attributes_task,
-                         padding_length=padding_length)
-dataset_name = 'organic'
+# label_dim = 3
+# annotator_dim = 10
+# padding_length = 136
+# predict_coarse_attributes_task = False
+# dataset = OrganicDataset(predict_coarse_attributes_task=predict_coarse_attributes_task,
+#                          padding_length=padding_length)
+# dataset_name = 'organic'
 
+label_dim = 2
+annotator_dim = 2
+loss = 'nll'
+one_dataset_one_annotator = False
+dataset = TripAdvisorDataset(one_dataset_one_annotator=one_dataset_one_annotator)
+dataset_name = 'tripadvisor'
+task = 'gender'
 
 sw = list(stop_words.ENGLISH_STOP_WORDS)
 # dataset_unique_words = brown.words()[:200000]

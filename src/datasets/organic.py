@@ -146,6 +146,8 @@ class OrganicDataset(BaseDataset):
         self.annotators = self.data.annotator.unique().tolist()
         self.data = self.data.to_dict('records')
 
-        self.data_shuffle(split_included=True)
+        no_shuffle = args.get('no_shuffle', False)
+        if no_shuffle is False:
+            self.data_shuffle(split_included=True)
 
         self.pseudo_labels_key = 'pseudo_labels'

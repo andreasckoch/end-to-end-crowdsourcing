@@ -1,16 +1,17 @@
 """
 Copyright (C) 2014 Dallas Card
 Copyright (C) 2018 Vaibhav B Sinha, Sukrut Rao, Vineeth N Balasubramanian
+<<<<<<< Updated upstream
 
+=======
+>>>>>>> Stashed changes
 Permission is hereby granted, free of charge, to any person obtaining a copy of this
 software and associated documentation files (the "Software"), to deal in the Software
 without restriction, including without limitation the rights to use, copy, modify, merge,
 publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons
  to whom the Software is furnished to do so, subject to the following conditions:
-
 The above copyright notice and this permission notice shall be included in all copies or
 substantial portions of the Software.
-
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
 INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
 PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE
@@ -204,7 +205,6 @@ def responses_to_counts(responses):
 def initialize(counts, mode):
     """
     Get majority voting estimates for the true classes using counts
-
     Args:
         counts: counts of the number of times each response was received 
             by each question from each participant: [questions x participants x classes]
@@ -214,7 +214,6 @@ def initialize(counts, mode):
             'FDS': use for FDS algorithm
             'DS': use for original DS algorithm
             'H': use for Hybrid algorithm
-
     Returns:
         question_classes: matrix of estimates of true classes:
             [questions x responses] 
@@ -238,18 +237,15 @@ def initialize(counts, mode):
 def m_step(counts, question_classes):
     """
     M Step for the EM algorithm
-
     Get estimates for the prior class probabilities (p_j) and the error
     rates (pi_jkl) using MLE with current estimates of true question classes
     See equations 2.3 and 2.4 in Dawid-Skene (1979) or equations 3 and 4 in 
     our paper (Fast Dawid-Skene: A Fast Vote Aggregation Scheme for Sentiment 
     Classification)
-
     Args: 
         counts: Array of how many times each response was received
             by each question from each participant: [questions x participants x classes]
         question_classes: Matrix of current assignments of questions to classes
-
     Returns:
         p_j: class marginals - the probability that the correct answer of a question
             is a given choice (class) [classes]
@@ -280,14 +276,12 @@ def m_step(counts, question_classes):
 def e_step(counts, class_marginals, error_rates, mode):
     """
     E (+ C) Step for the EM algorithm
-
     Determine the probability of each question belonging to each class,
     given current ML estimates of the parameters from the M-step. Also 
     perform the C step (along with E step (see section 3.4)) in case of FDS.
     See equation 2.5 in Dawid-Skene (1979) or equations 1 and 2 in 
     our paper (Fast Dawid Skene: A Fast Vote Aggregation Scheme for Sentiment 
     Classification)
-
     Args:
         counts: Array of how many times each response was received
             by each question from each participant: [questions x participants x classes]
@@ -300,7 +294,6 @@ def e_step(counts, class_marginals, error_rates, mode):
             'FDS': use for FDS algorithm
             'DS': use for original DS algorithm
             'H' and 'Hphase2': use for Hybrid algorithm
-
     Returns:
         question_classes: Assignments of labels to questions
             [questions x classes]
@@ -348,7 +341,6 @@ def calc_likelihood(counts, class_marginals, error_rates):
         class_marginals: probability of a random question belonging to each class: [classes]
         error_rates: probability of participant k assigning a question whose correct 
             label is j the label l: [observers x classes x classes]
-
     Returns:
         Likelihood given current parameter estimates
     """

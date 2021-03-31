@@ -61,15 +61,27 @@ class BaseDataset(Dataset):
                 'test': [point for point in self.data if point['split'] == 'test']
             }
         else:
-            length = len(self.data)
+            # make sure there are no samples in two splits
+            unique_samples = list(set([point['text'] for point in self.data]))
+            length = len(unique_samples)
             eof_train_split = int(length * self.train_val_split * 0.9)
             eof_val_split = int(length * 0.9)
 
             self.data = {
-                'train': self.data[0:eof_train_split],
-                'validation': self.data[eof_train_split:eof_val_split],
-                'test': self.data[eof_val_split:]
+                'train': [point for point in self.data if point['text'] in unique_samples[0:eof_train_split]],
+                'validation': [point for point in self.data if point['text'] in unique_samples[eof_train_split:eof_val_split]],
+                'test': [point for point in self.data if point['text'] in unique_samples[eof_val_split:]]
             }
+
+            # length = len(self.data)
+            # eof_train_split = int(length * self.train_val_split * 0.9)
+            # eof_val_split = int(length * 0.9)
+
+            # self.data = {
+            #     'train': self.data[0:eof_train_split],
+            #     'validation': self.data[eof_train_split:eof_val_split],
+            #     'test': self.data[eof_val_split:]
+            # }
 
         if self.annotator_filter is not '':
             self.data_mask = [x['annotator'] == self.annotator_filter for x in self.data[self.mode]]
@@ -110,6 +122,27 @@ class BaseDataset(Dataset):
 
         if self.annotator_filter is not '':
             self.data_mask = [x['annotator'] == self.annotator_filter for x in self.data[self.mode]]
+
+    def remove_pseudo_labels(self):
+        for mode in self.data.keys():
+            for point in self.data[mode]:
+                point[self.pseudo_labels_key] = {}
+
+    def use_custom_labels(self, sample_label_map, mode='train'):
+        """Use custom labels and discard redundant training data
+
+        Args:
+            sample_label_map (dict): map every sample text to its predicted label
+        """
+        self.set_mode(mode)
+        samples = list(sample_label_map.keys())
+        new_data = []
+        for point in self.data[self.mode]:
+            if point['text'] in samples and point['text'] not in [new_point['text'] for new_point in new_data]:
+                point['label'] = sample_label_map[point['text']]
+                point['annotator'] = 'custom'
+                new_data.append(point)
+        self.data[self.mode] = new_data
 
     def __len__(self):
         if self.annotator_filter is not '':

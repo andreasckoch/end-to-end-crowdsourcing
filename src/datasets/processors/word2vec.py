@@ -8,7 +8,7 @@ def _build_text_processor(**argv):
     tokenizer = RegexpTokenizer(r'\w+')
     padding_length = int(argv.get('padding_length', 100))
     embedding_dim = int(argv.get('embedding_dim', 50))
-    
+
     domain_embedding_path = argv.get('domain_embedding_path', '')
     domain_embeddings = {}
     if domain_embedding_path is not '':

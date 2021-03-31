@@ -76,9 +76,14 @@ class EmotionDataset(BaseDataset):
             self.emotion = 'ds'
 
         self.annotators = self.data.annotator.unique().tolist()
+
         self.data = self.data.to_dict('records')
 
-        self.data_shuffle()
+        # do custom split
+        self.custom_data_split()
+        no_shuffle = args.get('no_shuffle', False)
+        if no_shuffle is False:
+            self.data_shuffle_after_split()
 
         self.pseudo_labels_key = f'{self.emotion}_pseudo_labels'
 
@@ -87,6 +92,37 @@ class EmotionDataset(BaseDataset):
             raise Exception(f"Emotion must be one of these: \n{','.join(self.emotions)}")
         self.emotion = emotion
         self.pseudo_labels_key = f'{self.emotion}_pseudo_labels'
+
+    def custom_data_split(self):
+        # since split isn't always the same for some reason, do it explicitly here
+        texts = set([point['text'] for point in self.data])
+        modes = ['train', 'validation', 'test']
+        split_at = {'train': 72, 'validation': 18, 'test': 10}
+        new_texts = {'train': [], 'validation': [], 'test': []}
+        annotator_texts = {}
+        for ann in self.annotators:
+            annotator_texts[ann] = [point['text'] for point in self.data if point['annotator'] == ann]
+        problem_text = "Outcry at N Korea 'nuclear test'"
+        for mode in modes:
+            i = 0
+            while len(new_texts[mode]) < split_at[mode]:
+                if len(annotator_texts[self.annotators[i]]) > 0:
+                    text = annotator_texts[self.annotators[i]].pop(0)
+                    # if text == problem_text:
+                    #     print(f'{annotator_texts[self.annotators[i]]}')
+                    new_texts[mode].append(text)
+                    for ann in self.annotators:
+                        if text in annotator_texts[ann]:
+                            annotator_texts[ann].remove(text)
+                            # if text == problem_text:
+                            #     print(f'{annotator_texts[ann]}')
+                i = (i + 1) % len(self.annotators)
+
+        new_data = {
+            mode: [point for point in self.data for text in new_texts[mode] if point['text'] == text]
+            for mode in modes
+        }
+        self.data = new_data
 
     def __getitem__(self, idx):
         if self.annotator_filter is not '':

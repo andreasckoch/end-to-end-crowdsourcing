@@ -135,6 +135,9 @@ data/tripadvisor/**/*.txt
 data/emotion/*
 data/equity/*
 data/organic/*
+data/dawid_skene/*
+data/mace/*
+data/majority_voting/*
 data/wikipedia/**/*.tsv
 data/embeddings/word2vec/*.txt
 data/embeddings/word2vec/**/*.pkl

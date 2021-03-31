@@ -65,7 +65,7 @@ def pre_text_processor(text, text_processor):
     Since the text in the Wikipedia dataset was preprocessed, this function reverses the preprocessing.
     ---- Mapping ----
     NEWLINE_TOKEN: \n
-    TAB_TOKEN: \t
+    TAB_TOKEN: \tand discard one annotator 
     `: \"
     """
     text_reversed = text.replace('NEWLINE_TOKEN', '\n').replace('TAB_TOKEN', '\t').replace('`', '\"')
