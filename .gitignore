@@ -137,6 +137,8 @@ data/equity/*
 data/organic/*
 data/dawid_skene/*
 data/mace/*
+data/mv/*
+data/ltnet/*
 data/majority_voting/*
 data/wikipedia/**/*.tsv
 data/embeddings/word2vec/*.txt

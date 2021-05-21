@@ -91,6 +91,7 @@ model_path = 'ltnet_pseudo/0.44868_batch64_lr7.084359020902504e-05_20210215-0428
 # dataset.set_emotion(emotion)
 # task = 'valence'
 # extra = 'step_plot'
+# one_dataset_one_annotator = False
 # if domain_embedding_path is not '':
 #     extra += '_fine_tuned_emb'
 #     task += '_fine_tuned_emb'
@@ -184,6 +185,11 @@ for mode in list(dataset.data.keys()):
 mv_labels = {sample: Counter(mv_labels[sample]).most_common(1)[
     0][0] for sample in list(mv_labels.keys())}
 
+labels_path_mv = f"../data/mv/{dataset_name}/sample_label_map_all.pkl"
+f = open(labels_path_mv, "wb")
+pickle.dump(mv_labels, f)
+f.close()
+
 # load LTNet classifier
 model = Ipa2ltHead(50, label_dim, annotator_dim, use_softmax=USE_SOFTMAX)
 model.to(DEVICE)
@@ -201,6 +207,10 @@ for mode in list(dataset.data.keys()):
 # filter redundant samples and possible samples not in dawid_skene map
 ltnet_labels = {sample: ltnet_labels[sample]
                 for sample in set(dawid_skene_labels.keys())}
+labels_path_ltnet = f"../data/ltnet/{dataset_name}/sample_label_map_all.pkl"
+f = open(labels_path_ltnet, "wb")
+pickle.dump(ltnet_labels, f)
+f.close()
 
 # get correct values
 big_samples_labels_map = {sample: {
@@ -216,6 +226,16 @@ def krippendorf_alpha(annotations):
     t = AnnotationTask(annotations)  # distance=binary_distance per default
     return t.alpha()  # Krippendorff's alpha
 
+def cohens_kappa(annotations):
+    t = AnnotationTask(annotations)  # distance=binary_distance per default
+    return t.kappa()  # Cohen's alpha
+
+def pearson(annotations):
+    from scipy.stats import pearsonr
+    key1, key2 = annotations[0][0], annotations[1][0]
+    x = [float(entry[2]) for entry in alpha_entry if entry[0] == key1]
+    y = [float(entry[2]) for entry in alpha_entry if entry[0] == key2]
+    return pearsonr(x, y)[0]
 
 overlap = {
     'All match': [item[0] for item in list(big_samples_labels_map.items())
@@ -240,13 +260,12 @@ overlap = {
                      if item[1]['mace'] == item[1]['ltnet']],
     'MV - LTNet': [item[0] for item in list(big_samples_labels_map.items())
                    if item[1]['mv'] == item[1]['ltnet']],
-    'All different': [item[0] for item in list(big_samples_labels_map.items())
-                      if item[1]['ds'] != item[1]['mace'] != item[1]['mv'] != item[1]['ltnet']],
-    'Total': list(big_samples_labels_map.keys()),
+    # 'All different': [item[0] for item in list(big_samples_labels_map.items())
+    #                   if item[1]['ds'] != item[1]['mace'] != item[1]['mv'] != item[1]['ltnet']],
+    # 'Total': list(big_samples_labels_map.keys()),
 }
 
 methods = {
-    'All match': ['ds', 'mace', 'mv', 'ltnet'],
     'DS - MACE - MV': ['ds', 'mace', 'mv'],
     'DS - MACE - LTNet': ['ds', 'mace', 'ltnet'],
     'DS - MV - LTNet': ['ds', 'mv', 'ltnet'],
@@ -257,17 +276,28 @@ methods = {
     'MACE - MV': ['mace', 'mv'],
     'MACE - LTNet': ['mace', 'ltnet'],
     'MV - LTNet': ['mv', 'ltnet'],
+    'All match': ['ds', 'mace', 'mv', 'ltnet'],
     # 'All different': [],
 }
 
+# all_apps = [entry for entry in list(big_samples_labels_map.values()) for mask_entry in mask if mask_entry in list(entry.keys())]
+# mvs = [entry[2] for entry in alpha_entry if entry[0] == 'mv']
+
+
+
 alphas = {}
-for key, sample_list in list(overlap.items()):
+for key, approaches in list(methods.items()):
     alpha_entry = []
-    for sample in sample_list:
-        for approach, label in list(big_samples_labels_map[sample].items()):
-            # if approach in methods[key]:
-            alpha_entry.append((approach, sample, f'{label}'))
+    for sample, labels in list(big_samples_labels_map.items()):
+        # if approach in methods[key]:
+        for approach in labels.keys():
+            if approach in approaches:
+                # if key == 'DS - MV' and len(alpha_entry):
+                    # print(f'Labels: {labels}, Labels approach: {labels[approach]}')
+                alpha_entry.append((approach, sample, str(labels[approach])))
     if len(alpha_entry) != 0:
+        # if key == 'DS - MV':
+            # print(alpha_entry[:20])
         alphas[key] = krippendorf_alpha(alpha_entry)
 
 scores = {key: len(overlap[key]) for key in list(overlap.keys()) if len(overlap[key]) != 0}
@@ -297,9 +327,10 @@ ax.legend(['Samples (normalized)', 'Krippendorf\'s alpha'], loc='best', bbox_to_
 # plt.title(f'Agreement of inferred labels for the {dataset_name.capitalize()} dataset')
 # plt.ylabel('Methods')
 # plt.xlabel('Samples')
-save_path = f'{VISUALS_FOLDER}/{dataset_name}_inferred_labels_final.pdf'
+save_path = f'{VISUALS_FOLDER}/{dataset_name}_inferred_labels_gerry.png'
 if dataset_name == 'tripadvisor':
     if one_dataset_one_annotator is True:
-        save_path = f'{VISUALS_FOLDER}/tripadvisor_task3_inferred_labels_final.pdf'
+        save_path = f'{VISUALS_FOLDER}/tripadvisor_task3_inferred_labels_gerry.png'
 plt.savefig(save_path,
             bbox_inches='tight')
+
