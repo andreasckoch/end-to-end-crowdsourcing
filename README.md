@@ -2,7 +2,7 @@
 Comparison of traditional crowdsourcing approaches to a state-of-the-art end-to-end crowdsourcing approach LTNet on sentiment analysis.
 LTNet is adapted from ["Facial Expression Recognition with Inconsistently Annotated Datasets"](https://openaccess.thecvf.com/content_ECCV_2018/papers/Jiabei_Zeng_Facial_Expression_Recognition_ECCV_2018_paper.pdf) to text data. It encompasses a simple attention based neural network and utilizes confusion matrices as a noise reduction technique. For comparison, the traditional ground truth estimators ["Fast-Dawid-Skene"](https://arxiv.org/pdf/1803.02781) and ["MACE"](www.cs.cmu.edu/~./hovy/papers/13HLT-MACE.pdf) are applied. 
 
-This codebase was used in both ["End-to-End Annotator Bias Approximation on Crowdsourced Single-Label Sentiment Analysis"]() and ["Deep End-to-End Learning for Noisy Annotations and Crowdsourcing in Natural Language Processing"]().
+This codebase was used in both ["End-to-End Annotator Bias Approximation on Crowdsourced Single-Label Sentiment Analysis"](https://arxiv.org/abs/2111.02326) and ["Deep End-to-End Learning for Noisy Annotations and Crowdsourcing in Natural Language Processing"](https://github.com/theonlyandreas/end-to-end-crowdsourcing/blob/master/thesis/Masterarbeit.pdf).
 
 ## Training
 
